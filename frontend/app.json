@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Tikhat Partner",
-    "slug": "tikhat-partner",
+    "slug": "tikhat-foods",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -36,6 +36,11 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "INTERNET",
         "ACCESS_NETWORK_STATE"
       ]
     },
@@ -52,6 +57,22 @@
     "experiments": {
       "typedRoutes": true
     },
-    "primaryColor": "#0A1628"
+    "primaryColor": "#0A1628",
+    "extra": {
+      "apiUrl": "https://tikhatpartner.online/api/v1",
+      "eas": {
+        "projectId": "f448bfb4-ed69-463c-b9f6-41fcc7418655"
+      },
+      "router": {
+        "origin": false
+      }
+    },
+    "owner": "tikhat-foods-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f448bfb4-ed69-463c-b9f6-41fcc7418655"
+    }
   }
 }

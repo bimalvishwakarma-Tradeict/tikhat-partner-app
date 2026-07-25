@@ -1,76 +1,92 @@
+import { useCallback, useEffect, useRef } from 'react';
 import {
-  Image,
   StyleSheet,
-  Text,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { useRouter, type Href } from 'expo-router';
+import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import Animated, {
-  FadeIn,
   useAnimatedStyle,
   type SharedValue,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { APP_NAME, COMPANY_NAME } from '../constants';
-import { lightColors } from '../theme';
-import Logo from '@/assets/logo.png';
+
+const HOME_HREF = '/(auth)' as Href;
+const FALLBACK_TIMEOUT_MS = 4000;
+const SPLASH_BG = '#0A1628';
 
 export type SplashScreenProps = {
-  /** 1 = fully visible, 0 = faded out */
+  /** 1 = fully visible, 0 = faded out (boot overlay from root layout) */
   opacity?: SharedValue<number>;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 };
 
 /**
- * Branded splash — dark blue background, logo, accent line.
- * Used as a boot overlay and available at `/splash`.
+ * Full-screen splash video. Used as boot overlay and at `/splash`.
  */
 export function SplashScreen({ opacity, style, testID }: SplashScreenProps) {
-  const insets = useSafeAreaInsets();
-  const colors = lightColors;
+  const router = useRouter();
+  const finishedRef = useRef(false);
 
-  const animatedStyle = useAnimatedStyle(() => ({
+  const finish = useCallback(() => {
+    if (finishedRef.current) {
+      return;
+    }
+    finishedRef.current = true;
+
+    // Boot overlay: root layout dismisses via opacity fade — skip route replace.
+    if (opacity) {
+      return;
+    }
+
+    try {
+      router.replace(HOME_HREF);
+    } catch {
+      // Ignore navigation errors if already transitioning.
+    }
+  }, [opacity, router]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      finish();
+    }, FALLBACK_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [finish]);
+
+  const onPlaybackStatusUpdate = useCallback(
+    (status: AVPlaybackStatus) => {
+      if (!status.isLoaded) {
+        return;
+      }
+      if (status.didJustFinish) {
+        finish();
+      }
+    },
+    [finish]
+  );
+
+  const rootStyle = useAnimatedStyle(() => ({
     opacity: opacity ? opacity.value : 1,
   }));
 
   return (
     <Animated.View
       testID={testID}
-      entering={opacity ? undefined : FadeIn.duration(300)}
-      style={[
-        styles.root,
-        {
-          backgroundColor: colors.primary,
-          paddingTop: insets.top,
-          paddingBottom: insets.bottom,
-        },
-        animatedStyle,
-        style,
-      ]}
+      style={[styles.root, { backgroundColor: SPLASH_BG }, rootStyle, style]}
     >
-      <View style={styles.center}>
-        <Image
-          source={Logo}
-          style={{ height: 180, width: 280, resizeMode: 'contain' }}
+      <View style={styles.videoWrap}>
+        <Video
+          source={require('@/assets/Splash.mp4')}
+          style={styles.video}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay
+          isLooping={false}
+          isMuted
+          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         />
-
-        <View
-          style={[styles.accentLine, { backgroundColor: colors.secondary }]}
-        />
-
-        <Text style={[styles.title, { color: colors.text.inverse }]}>
-          {APP_NAME}
-        </Text>
-        <Text style={[styles.subtitle, { color: colors.secondary }]}>
-          {COMPANY_NAME}
-        </Text>
       </View>
-
-      <Text style={[styles.footer, { color: colors.text.secondary }]}>
-        Partner investment platform
-      </Text>
     </Animated.View>
   );
 }
@@ -83,36 +99,17 @@ export default function SplashRoute() {
 const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
     zIndex: 10000,
     elevation: 10000,
   },
-  center: {
-    alignItems: 'center',
+  videoWrap: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: SPLASH_BG,
   },
-  accentLine: {
-    width: 48,
-    height: 3,
-    borderRadius: 2,
-    marginTop: 20,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-  },
-  subtitle: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: '500',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 48,
-    fontSize: 12,
+  video: {
+    width: '100%',
+    height: '100%',
   },
 });
