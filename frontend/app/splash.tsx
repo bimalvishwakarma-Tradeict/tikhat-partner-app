@@ -87,7 +87,7 @@ export function SplashScreen({
   return (
     <Animated.View
       testID={testID}
-      style={[styles.root, { backgroundColor: SPLASH_BG }, rootStyle, style]}
+      style={[styles.root, rootStyle, style]}
     >
       <View style={styles.videoWrap}>
         <Video
@@ -113,16 +113,21 @@ export default function SplashRoute() {
 const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFillObject,
+    flex: 1,
+    backgroundColor: SPLASH_BG,
     zIndex: 10000,
     elevation: 10000,
   },
   videoWrap: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: SPLASH_BG,
   },
   video: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    right: 0,
     width: '100%',
     height: '100%',
   },

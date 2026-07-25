@@ -392,6 +392,33 @@ function normalizeAmount(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {number}
+ */
+function toRoiPercentDecimal(value) {
+  const n = Number.parseFloat(String(value));
+  if (!Number.isFinite(n)) {
+    return 0;
+  }
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Ensure ROI row payloads expose decimal roi_percentage (2 places).
+ * @param {object | null | undefined} row
+ * @returns {object | null}
+ */
+function withDecimalRoi(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    ...row,
+    roi_percentage: toRoiPercentDecimal(row.roi_percentage),
+  };
+}
+
+/**
  * @param {string | undefined} value
  * @returns {boolean}
  */
@@ -513,7 +540,11 @@ export async function getInvestorRoi(req, res) {
     return res.status(200).json({
       success: true,
       message: 'ROI settings retrieved',
-      data,
+      data: {
+        defaultRoi: withDecimalRoi(data.defaultRoi),
+        terms: (data.terms || []).map(withDecimalRoi),
+        settings: (data.settings || []).map(withDecimalRoi),
+      },
     });
   } catch (error) {
     return handleError(res, error, 'getInvestorRoi');
@@ -544,7 +575,7 @@ export async function setInvestorDefaultRoi(req, res) {
     return res.status(200).json({
       success: true,
       message: 'Default ROI updated',
-      data: row,
+      data: withDecimalRoi(row),
     });
   } catch (error) {
     return handleError(res, error, 'setInvestorDefaultRoi');
@@ -576,7 +607,7 @@ export async function addInvestorTermRoi(req, res) {
     return res.status(201).json({
       success: true,
       message: 'Term ROI added',
-      data: row,
+      data: withDecimalRoi(row),
     });
   } catch (error) {
     return handleError(res, error, 'addInvestorTermRoi');
@@ -601,7 +632,7 @@ export async function removeInvestorTermRoi(req, res) {
     return res.status(200).json({
       success: true,
       message: 'Term ROI removed',
-      data: row,
+      data: withDecimalRoi(row),
     });
   } catch (error) {
     return handleError(res, error, 'removeInvestorTermRoi');
@@ -617,7 +648,11 @@ export async function getInvestorActiveRoi(req, res) {
     return res.status(200).json({
       success: true,
       message: 'Active ROI retrieved',
-      data,
+      data: {
+        ...data,
+        roiPercentage: toRoiPercentDecimal(data.roiPercentage),
+        setting: withDecimalRoi(data.setting),
+      },
     });
   } catch (error) {
     return handleError(res, error, 'getInvestorActiveRoi');
@@ -1613,9 +1648,13 @@ export async function listRevenueInvestors(req, res) {
         status: row.status,
         revenue_paused: row.revenue_paused === true,
         credit_frequency: row.credit_frequency || 'daily',
-        default_roi: row.default_roi != null ? Number(row.default_roi) : null,
-        active_roi: activeRoi,
-        effective_roi: effectiveRoi,
+        default_roi:
+          row.default_roi != null
+            ? toRoiPercentDecimal(row.default_roi)
+            : null,
+        active_roi: toRoiPercentDecimal(activeRoi),
+        effective_roi:
+          effectiveRoi != null ? toRoiPercentDecimal(effectiveRoi) : effectiveRoi,
         revenue_balance: revenueBalance,
         revenue_balance_formatted: formatCurrency(revenueBalance),
         revenue_credited_this_month: monthCredits,

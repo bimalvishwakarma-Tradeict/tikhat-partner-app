@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS roi_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   investor_id UUID NOT NULL,
   type VARCHAR(20) NOT NULL,
-  roi_percentage INTEGER NOT NULL,
+  roi_percentage NUMERIC(5,2) NOT NULL,
   start_date DATE,
   end_date DATE,
   created_by UUID,
@@ -47,3 +47,8 @@ CREATE INDEX IF NOT EXISTS idx_roi_settings_created_at
 CREATE UNIQUE INDEX IF NOT EXISTS uq_roi_settings_active_default
   ON roi_settings (investor_id)
   WHERE type = 'default' AND is_active = TRUE;
+
+-- Upgrade existing INTEGER column to support 2 decimal places (e.g. 4.50)
+ALTER TABLE roi_settings
+  ALTER COLUMN roi_percentage TYPE NUMERIC(5,2)
+  USING ROUND(roi_percentage::NUMERIC, 2);

@@ -3,7 +3,8 @@ import { Slot, useRouter, useSegments, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Easing,
   runOnJS,
@@ -34,6 +35,31 @@ const HOME_HREF = '/(auth)/' as Href;
 const PARTNER_DASHBOARD_HREF = '/(partner)/dashboard' as Href;
 const ADMIN_DASHBOARD_HREF = '/(admin)/dashboard' as Href;
 const SPLASH_FADE_MS = 420;
+const SPLASH_SHOWN_KEY = 'splashShown';
+
+/**
+ * Session splash flag.
+ * Web: sessionStorage — survives refresh, clears when tab/window closes (cold start).
+ * Also writes AsyncStorage key `splashShown` for tracking.
+ * Native: always show on BootRoot mount (cold start only; nav does not remount root).
+ */
+async function hasSplashBeenShownThisSession(): Promise<boolean> {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    return sessionStorage.getItem(SPLASH_SHOWN_KEY) === 'true';
+  }
+  return false;
+}
+
+async function markSplashShownThisSession(): Promise<void> {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(SPLASH_SHOWN_KEY, 'true');
+  }
+  try {
+    await AsyncStorage.setItem(SPLASH_SHOWN_KEY, 'true');
+  } catch {
+    // Non-fatal
+  }
+}
 
 /**
  * Returns true when JWT is present and not expired.
@@ -132,7 +158,10 @@ function BootRoot() {
   const logout = useAuthStore((s) => s.logout);
   const token = useAuthStore((s) => s.token);
 
-  const [showSplash, setShowSplash] = useState(true);
+  const [splashGate, setSplashGate] = useState<'loading' | 'show' | 'skip'>(
+    'loading'
+  );
+  const [showSplash, setShowSplash] = useState(false);
   const [bootComplete, setBootComplete] = useState(false);
   const splashOpacity = useSharedValue(1);
   const started = useRef(false);
@@ -153,6 +182,7 @@ function BootRoot() {
       return;
     }
     dismissing.current = true;
+    void markSplashShownThisSession();
     splashOpacity.value = withTiming(
       0,
       { duration: SPLASH_FADE_MS, easing: Easing.out(Easing.cubic) },
@@ -169,8 +199,38 @@ function BootRoot() {
     tryDismissSplash();
   }, [tryDismissSplash]);
 
+  // Decide whether to show splash this session (skip on web refresh)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const alreadyShown = await hasSplashBeenShownThisSession();
+      if (cancelled) {
+        return;
+      }
+      if (alreadyShown) {
+        setSplashGate('skip');
+        setShowSplash(false);
+        videoDone.current = true;
+      } else {
+        setSplashGate('show');
+        setShowSplash(true);
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setSplashGate('show');
+        setShowSplash(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (started.current) {
+      return;
+    }
+    if (splashGate === 'loading') {
       return;
     }
     started.current = true;
@@ -184,13 +244,25 @@ function BootRoot() {
       }
 
       hydrateDone.current = true;
+
+      if (splashGate === 'skip') {
+        finishSplash();
+        return;
+      }
+
       tryDismissSplash();
     })().catch(() => {
       hydrateDone.current = true;
       videoDone.current = true;
       finishSplash();
     });
-  }, [hydrate, logout, tryDismissSplash, finishSplash]);
+  }, [
+    splashGate,
+    hydrate,
+    logout,
+    tryDismissSplash,
+    finishSplash,
+  ]);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
@@ -214,6 +286,14 @@ function BootRoot() {
 
   // Keep token in deps unused intentionally — read via getState after hydrate.
   void token;
+
+  if (splashGate === 'loading') {
+    return (
+      <View style={[styles.flex, { backgroundColor: colors.primary }]}>
+        <StatusBar style="light" />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.flex, { backgroundColor: colors.background }]}>

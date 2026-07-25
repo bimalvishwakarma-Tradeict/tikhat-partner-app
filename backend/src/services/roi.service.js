@@ -42,6 +42,7 @@ export const getISTDateParts = (date) => {
 /**
  * Full-month revenue for a capital balance.
  * Monthly amount = Math.round(capital * roiPercent / 100)
+ * ROI % supports 2 decimal places (e.g. 4.50); money result stays whole rupees.
  *
  * @param {number} capital
  * @param {number} roiPercent
@@ -50,9 +51,9 @@ export const getISTDateParts = (date) => {
  */
 export const calculateMonthlyAmount = (capital, roiPercent, _daysInMonth) => {
   const cap = Math.round(Number(capital) || 0);
-  const roi = Math.round(Number(roiPercent) || 0);
+  const roi = Number.parseFloat(String(roiPercent));
 
-  if (cap <= 0 || roi <= 0) {
+  if (cap <= 0 || !Number.isFinite(roi) || roi <= 0) {
     return 0;
   }
 
@@ -254,7 +255,8 @@ export const getActiveROI = async (investorId, date) => {
     );
 
     if (termResult.rows.length > 0) {
-      return Math.round(Number(termResult.rows[0].roi_percentage));
+      const roi = Number.parseFloat(String(termResult.rows[0].roi_percentage));
+      return Number.isFinite(roi) ? Math.round(roi * 100) / 100 : 0;
     }
 
     const defaultResult = await pool.query(
@@ -273,7 +275,8 @@ export const getActiveROI = async (investorId, date) => {
       return 0;
     }
 
-    return Math.round(Number(defaultResult.rows[0].roi_percentage));
+    const roi = Number.parseFloat(String(defaultResult.rows[0].roi_percentage));
+    return Number.isFinite(roi) ? Math.round(roi * 100) / 100 : 0;
   } catch (error) {
     logger.error(`[ROIService] getActiveROI error: ${error.message}`, {
       investorId,

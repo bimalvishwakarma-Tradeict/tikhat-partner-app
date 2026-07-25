@@ -43,11 +43,31 @@ const SETTINGS_COLUMNS = `
 `;
 
 /**
+ * Normalize ROI % to 2 decimal places (e.g. 4.50). Does not integer-round.
  * @param {unknown} value
  * @returns {number}
  */
 function toRoiPercent(value) {
-  return Math.round(Number(value));
+  const n = Number.parseFloat(String(value));
+  if (!Number.isFinite(n)) {
+    return NaN;
+  }
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Ensure API rows expose roi_percentage as a decimal number.
+ * @param {object | null} row
+ * @returns {object | null}
+ */
+function mapRoiRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    ...row,
+    roi_percentage: toRoiPercent(row.roi_percentage),
+  };
 }
 
 /**
@@ -113,9 +133,9 @@ export async function getRoiSettings(investorId) {
   const terms = result.rows.filter((r) => r.type === 'term');
 
   return {
-    defaultRoi,
-    terms,
-    settings: result.rows,
+    defaultRoi: mapRoiRow(defaultRoi),
+    terms: terms.map(mapRoiRow),
+    settings: result.rows.map(mapRoiRow),
   };
 }
 
@@ -132,7 +152,7 @@ export async function setDefaultRoi(investorId, percentage, adminId) {
   const roi = toRoiPercent(percentage);
   if (!Number.isFinite(roi) || roi <= 0) {
     throw new RevenueError(
-      'ROI percentage must be a positive whole number',
+      'ROI percentage must be a positive number (up to 2 decimal places)',
       'VALIDATION_ERROR',
       400
     );
@@ -169,7 +189,7 @@ export async function setDefaultRoi(investorId, percentage, adminId) {
     await client.query('COMMIT');
 
     logger.info('Default ROI set', { investorId, roi, adminId });
-    return result.rows[0];
+    return mapRoiRow(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -195,7 +215,7 @@ export async function addTermRoi({
   const roi = toRoiPercent(percentage);
   if (!Number.isFinite(roi) || roi <= 0) {
     throw new RevenueError(
-      'ROI percentage must be a positive whole number',
+      'ROI percentage must be a positive number (up to 2 decimal places)',
       'VALIDATION_ERROR',
       400
     );
@@ -239,7 +259,7 @@ export async function addTermRoi({
     termId: result.rows[0].id,
   });
 
-  return result.rows[0];
+  return mapRoiRow(result.rows[0]);
 }
 
 /**
@@ -276,7 +296,7 @@ export async function deleteTermRoi(investorId, termId) {
   );
 
   logger.info('Term ROI deleted', { investorId, termId });
-  return result.rows[0];
+  return mapRoiRow(result.rows[0]);
 }
 
 /**
@@ -330,9 +350,9 @@ export async function getActiveRoiForDate(investorId, dateStr) {
 
   return {
     date,
-    roiPercentage: percentage,
+    roiPercentage: toRoiPercent(percentage),
     source,
-    setting: termResult.rows[0] || defaultResult.rows[0] || null,
+    setting: mapRoiRow(termResult.rows[0] || defaultResult.rows[0] || null),
   };
 }
 
