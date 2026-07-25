@@ -43,7 +43,8 @@ const SETTINGS_COLUMNS = `
 `;
 
 /**
- * Normalize ROI % to 2 decimal places (e.g. 4.50). Does not integer-round.
+ * Normalize ROI % via parseFloat to 2 decimal places (e.g. 2.25).
+ * Never use parseInt / integer Math.round on ROI %.
  * @param {unknown} value
  * @returns {number}
  */
@@ -52,7 +53,8 @@ function toRoiPercent(value) {
   if (!Number.isFinite(n)) {
     return NaN;
   }
-  return Math.round(n * 100) / 100;
+  // Keep 2 decimal places without converting to integer
+  return Number.parseFloat(n.toFixed(2));
 }
 
 /**

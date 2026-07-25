@@ -400,7 +400,7 @@ function toRoiPercentDecimal(value) {
   if (!Number.isFinite(n)) {
     return 0;
   }
-  return Math.round(n * 100) / 100;
+  return Number.parseFloat(n.toFixed(2));
 }
 
 /**
@@ -558,9 +558,20 @@ export async function getInvestorRoi(req, res) {
 export async function setInvestorDefaultRoi(req, res) {
   try {
     const before = await getRoiSettings(req.params.id);
+    const rawPercentage = req.body.percentage ?? req.body.roi_percentage;
+    const percentage = Number.parseFloat(String(rawPercentage));
+    if (!Number.isFinite(percentage) || percentage <= 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'ROI percentage must be a positive number (up to 2 decimal places)',
+        error: 'VALIDATION_ERROR',
+      });
+    }
+
     const row = await setDefaultRoi(
       req.params.id,
-      req.body.percentage ?? req.body.roi_percentage,
+      percentage,
       req.user.userId
     );
 
@@ -588,9 +599,20 @@ export async function setInvestorDefaultRoi(req, res) {
  */
 export async function addInvestorTermRoi(req, res) {
   try {
+    const rawPercentage = req.body.percentage ?? req.body.roi_percentage;
+    const percentage = Number.parseFloat(String(rawPercentage));
+    if (!Number.isFinite(percentage) || percentage <= 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'ROI percentage must be a positive number (up to 2 decimal places)',
+        error: 'VALIDATION_ERROR',
+      });
+    }
+
     const row = await addTermRoi({
       investorId: req.params.id,
-      percentage: req.body.percentage ?? req.body.roi_percentage,
+      percentage,
       startDate: req.body.start_date,
       endDate: req.body.end_date,
       adminId: req.user.userId,

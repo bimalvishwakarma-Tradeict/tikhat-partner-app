@@ -256,7 +256,7 @@ export const getActiveROI = async (investorId, date) => {
 
     if (termResult.rows.length > 0) {
       const roi = Number.parseFloat(String(termResult.rows[0].roi_percentage));
-      return Number.isFinite(roi) ? Math.round(roi * 100) / 100 : 0;
+      return Number.isFinite(roi) ? Number.parseFloat(roi.toFixed(2)) : 0;
     }
 
     const defaultResult = await pool.query(
@@ -276,7 +276,7 @@ export const getActiveROI = async (investorId, date) => {
     }
 
     const roi = Number.parseFloat(String(defaultResult.rows[0].roi_percentage));
-    return Number.isFinite(roi) ? Math.round(roi * 100) / 100 : 0;
+    return Number.isFinite(roi) ? Number.parseFloat(roi.toFixed(2)) : 0;
   } catch (error) {
     logger.error(`[ROIService] getActiveROI error: ${error.message}`, {
       investorId,

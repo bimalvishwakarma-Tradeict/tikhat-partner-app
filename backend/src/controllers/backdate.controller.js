@@ -57,6 +57,28 @@ function isUuid(value) {
 }
 
 /**
+ * ROI % as decimal (2 places). Never integer-round.
+ * @param {unknown} value
+ * @returns {number}
+ */
+function parseRoiPercent(value) {
+  const n = Number.parseFloat(String(value));
+  if (!Number.isFinite(n)) {
+    return NaN;
+  }
+  return Number.parseFloat(n.toFixed(2));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isValidRoiPercent(value) {
+  const n = parseRoiPercent(value);
+  return Number.isFinite(n) && n > 0;
+}
+
+/**
  * @param {unknown} value
  * @param {string} field
  * @returns {string}
@@ -292,8 +314,8 @@ async function resolveSingleDayAmount(investorId, dateStr, options = {}) {
   );
   const resolvedRoi =
     options.roiPercentage != null
-      ? Math.round(Number(options.roiPercentage))
-      : Math.round(await getActiveROI(investorId, dateStr));
+      ? parseRoiPercent(options.roiPercentage)
+      : parseRoiPercent(await getActiveROI(investorId, dateStr));
 
   if (options.amount != null && options.amount !== '') {
     const amount = Math.round(Number(options.amount));
@@ -400,8 +422,8 @@ export async function buildBulkRevenueDistribution(
       );
       const roi =
         roiOverride != null
-          ? Math.round(Number(roiOverride))
-          : Math.round(await getActiveROI(investorId, dateStr));
+          ? parseRoiPercent(roiOverride)
+          : parseRoiPercent(await getActiveROI(investorId, dateStr));
 
       if (capital <= 0 || roi <= 0) {
         meta.push({ date: dateStr, capital, roi, dailyAvg: 0 });
@@ -532,9 +554,9 @@ export async function buildPeriodRevenueEstimate({
 
       let roi;
       if (roiOverride != null) {
-        roi = Math.round(Number(roiOverride));
+        roi = parseRoiPercent(roiOverride);
       } else if (investorId) {
-        roi = Math.round(await getActiveROI(investorId, dateStr));
+        roi = parseRoiPercent(await getActiveROI(investorId, dateStr));
       } else {
         roi = 0;
       }
@@ -748,7 +770,7 @@ export async function previewCapitalBackdate(req, res) {
       req.body?.roi_percentage !== null &&
       req.body?.roi_percentage !== ''
     ) {
-      roiOverride = Math.round(Number(req.body.roi_percentage));
+      roiOverride = parseRoiPercent(req.body.roi_percentage);
     }
 
     const estimate = await buildPeriodRevenueEstimate({
@@ -950,11 +972,12 @@ export async function submitNewInvestorBackdate(req, res) {
     );
     assertCapitalLimits(initialCapital);
 
-    const roiPercentage = Math.round(Number(body.roi_percentage));
-    if (!Number.isInteger(roiPercentage) || roiPercentage <= 0) {
+    const roiPercentage = parseRoiPercent(body.roi_percentage);
+    if (!isValidRoiPercent(roiPercentage)) {
       return res.status(400).json({
         success: false,
-        message: 'roi_percentage must be a positive integer',
+        message:
+          'roi_percentage must be a positive number (up to 2 decimal places)',
         error: 'VALIDATION_ERROR',
       });
     }
@@ -1360,7 +1383,7 @@ async function executeNewInvestorBackdate(request, approverId) {
   const sendEmailFlag = Boolean(request.send_email_to_investor);
   const joiningDate = details.joining_date;
   const initialCapital = Math.round(Number(details.initial_capital));
-  const roiPercentage = Math.round(Number(details.roi_percentage));
+  const roiPercentage = parseRoiPercent(details.roi_percentage);
   const createdAtIso = `${joiningDate}T00:00:00.000+05:30`;
 
   const client = await pool.connect();
@@ -1618,11 +1641,12 @@ export async function submitSingleRevenueBackdate(req, res) {
       req.body?.roi_percentage !== null &&
       req.body?.roi_percentage !== ''
     ) {
-      roiInput = Math.round(Number(req.body.roi_percentage));
-      if (!Number.isInteger(roiInput) || roiInput <= 0) {
+      roiInput = parseRoiPercent(req.body.roi_percentage);
+      if (!isValidRoiPercent(roiInput)) {
         return res.status(400).json({
           success: false,
-          message: 'roi_percentage must be a positive integer',
+          message:
+            'roi_percentage must be a positive number (up to 2 decimal places)',
           error: 'VALIDATION_ERROR',
         });
       }
@@ -1739,11 +1763,12 @@ export async function submitBulkRevenueBackdate(req, res) {
       req.body?.roi_percentage !== null &&
       req.body?.roi_percentage !== ''
     ) {
-      roiInput = Math.round(Number(req.body.roi_percentage));
-      if (!Number.isInteger(roiInput) || roiInput <= 0) {
+      roiInput = parseRoiPercent(req.body.roi_percentage);
+      if (!isValidRoiPercent(roiInput)) {
         return res.status(400).json({
           success: false,
-          message: 'roi_percentage must be a positive integer',
+          message:
+            'roi_percentage must be a positive number (up to 2 decimal places)',
           error: 'VALIDATION_ERROR',
         });
       }
@@ -1943,7 +1968,9 @@ async function insertBackdateCredit(client, params) {
       investorId,
       dateStr,
       Math.round(amount),
-      Math.round(roiPercentage) || null,
+      Number.isFinite(parseRoiPercent(roiPercentage))
+        ? parseRoiPercent(roiPercentage)
+        : null,
       Math.round(capitalAtTime),
     ]
   );
@@ -2014,8 +2041,8 @@ async function executeRevenueBackdate(request, approverId) {
     if (request.type === 'single_revenue') {
       const dateStr = details.date || request.start_date;
       const amount = Math.round(Number(details.resolved_amount));
-      const roi = Math.round(
-        Number(details.resolved_roi ?? details.roi_percentage ?? 0)
+      const roi = parseRoiPercent(
+        details.resolved_roi ?? details.roi_percentage ?? 0
       );
       const capital = Math.round(Number(details.capital_at_time ?? 0));
 

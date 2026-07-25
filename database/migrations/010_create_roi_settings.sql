@@ -48,7 +48,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_roi_settings_active_default
   ON roi_settings (investor_id)
   WHERE type = 'default' AND is_active = TRUE;
 
--- Upgrade existing INTEGER column to support 2 decimal places (e.g. 4.50)
+-- Upgrade existing INTEGER column to NUMERIC(5,2) for 2 decimal places
 ALTER TABLE roi_settings
   ALTER COLUMN roi_percentage TYPE NUMERIC(5,2)
-  USING ROUND(roi_percentage::NUMERIC, 2);
+  USING roi_percentage::NUMERIC(5,2);
