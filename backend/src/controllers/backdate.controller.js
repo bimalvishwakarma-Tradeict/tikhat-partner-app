@@ -451,7 +451,7 @@ export async function buildBulkRevenueDistribution(
       distribution.push({
         date: meta[i].date,
         amount,
-        roi_percentage: meta[i].roi,
+        roi_percentage: parseRoiPercent(meta[i].roi),
         capital_at_time: meta[i].capital,
       });
       expectedTotal += amount;
@@ -587,7 +587,7 @@ export async function buildPeriodRevenueEstimate({
       distribution.push({
         date: meta[i].date,
         amount,
-        roi_percentage: meta[i].roi,
+        roi_percentage: parseRoiPercent(meta[i].roi),
         capital_at_time: meta[i].capital,
       });
       expectedTotal += amount;
@@ -735,7 +735,9 @@ async function applyDistributionCredits(
       investorId,
       dateStr,
       amount,
-      roiPercentage: row.roi_percentage,
+      roiPercentage: parseRoiPercent(
+        row.roi_percentage ?? row.roiPercentage ?? row.roi
+      ),
       capitalAtTime: row.capital_at_time,
     });
     created.push(credit);
@@ -1136,7 +1138,7 @@ export async function submitNewInvestorBackdate(req, res) {
          details,
          status,
          send_email_to_investor
-       ) VALUES ($1, NULL, 'new_investor', $2::date, $3::date, $4, $5::jsonb, 'pending', $6)
+       ) VALUES ($1, NULL, 'new_investor', $2::date, $3::date, $4::NUMERIC(5,2), $5::jsonb, 'pending', $6)
        RETURNING id, submitted_by, approved_by, investor_id, type,
                  start_date, end_date, roi_percentage, details, status,
                  send_email_to_investor, execution_log, created_at, updated_at`,
@@ -1436,8 +1438,8 @@ async function executeNewInvestorBackdate(request, approverId) {
     await client.query(
       `INSERT INTO roi_settings (
          investor_id, type, roi_percentage, is_active, created_by
-       ) VALUES ($1, 'default', $2, TRUE, $3)`,
-      [investor.id, roiPercentage, approverId]
+       ) VALUES ($1, 'default', $2::NUMERIC(5,2), TRUE, $3)`,
+      [investor.id, parseRoiPercent(roiPercentage), approverId]
     );
 
     const capitalTxn = await insertBackdatedCapitalDeposit(client, {
@@ -1679,7 +1681,7 @@ export async function submitSingleRevenueBackdate(req, res) {
          details,
          status,
          send_email_to_investor
-       ) VALUES ($1, $2, 'single_revenue', $3::date, $3::date, $4, $5::jsonb, 'pending', $6)
+       ) VALUES ($1, $2, 'single_revenue', $3::date, $3::date, $4::NUMERIC(5,2), $5::jsonb, 'pending', $6)
        RETURNING id, submitted_by, approved_by, investor_id, type,
                  start_date, end_date, roi_percentage, details, status,
                  send_email_to_investor, execution_log, created_at, updated_at`,
@@ -1803,7 +1805,7 @@ export async function submitBulkRevenueBackdate(req, res) {
          details,
          status,
          send_email_to_investor
-       ) VALUES ($1, $2, 'bulk_revenue', $3::date, $4::date, $5, $6::jsonb, 'pending', $7)
+       ) VALUES ($1, $2, 'bulk_revenue', $3::date, $4::date, $5::NUMERIC(5,2), $6::jsonb, 'pending', $7)
        RETURNING id, submitted_by, approved_by, investor_id, type,
                  start_date, end_date, roi_percentage, details, status,
                  send_email_to_investor, execution_log, created_at, updated_at`,
@@ -1954,6 +1956,7 @@ async function insertBackdateCredit(client, params) {
 
   // Investor APIs map credit_type=backdate → "Revenue Credit" (never store
   // Backdate wording in remarks — none set here).
+  const appliedRoi = parseRoiPercent(roiPercentage);
   const insertResult = await client.query(
     `INSERT INTO revenue_credits (
        transaction_id,
@@ -1963,7 +1966,7 @@ async function insertBackdateCredit(client, params) {
        credit_type,
        roi_percentage_applied,
        capital_at_time
-     ) VALUES ($1, $2, $3::date, $4, 'backdate', $5, $6)
+     ) VALUES ($1, $2, $3::date, $4, 'backdate', $5::NUMERIC(5,2), $6)
      RETURNING id, transaction_id, investor_id, credit_date, amount,
                credit_type, roi_percentage_applied, capital_at_time, created_at`,
     [
@@ -1971,9 +1974,7 @@ async function insertBackdateCredit(client, params) {
       investorId,
       dateStr,
       Math.round(amount),
-      Number.isFinite(parseRoiPercent(roiPercentage))
-        ? parseRoiPercent(roiPercentage)
-        : null,
+      Number.isFinite(appliedRoi) ? appliedRoi : null,
       Math.round(capitalAtTime),
     ]
   );
@@ -2084,7 +2085,7 @@ async function executeRevenueBackdate(request, approverId) {
           investorId: investor.id,
           dateStr: row.date,
           amount,
-          roiPercentage: row.roi_percentage,
+          roiPercentage: parseRoiPercent(row.roi_percentage),
           capitalAtTime: row.capital_at_time,
         });
         createdCredits.push(credit);

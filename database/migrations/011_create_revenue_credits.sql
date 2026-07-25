@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS revenue_credits (
   credit_date DATE NOT NULL,
   amount INTEGER NOT NULL,
   credit_type VARCHAR(20) NOT NULL,
-  roi_percentage_applied INTEGER,
+  roi_percentage_applied NUMERIC(5,2),
   capital_at_time INTEGER,
   is_reversed BOOLEAN NOT NULL DEFAULT FALSE,
   reversed_by UUID,
@@ -64,3 +64,8 @@ CREATE INDEX IF NOT EXISTS idx_revenue_credits_created_at
 CREATE UNIQUE INDEX IF NOT EXISTS uq_revenue_credits_daily_auto
   ON revenue_credits (investor_id, credit_date)
   WHERE credit_type = 'daily_auto' AND is_deleted = FALSE AND is_reversed = FALSE;
+
+-- Upgrade existing INTEGER column so ROI decimals (e.g. 2.25) can be stored
+ALTER TABLE revenue_credits
+  ALTER COLUMN roi_percentage_applied TYPE NUMERIC(5,2)
+  USING roi_percentage_applied::NUMERIC(5,2);

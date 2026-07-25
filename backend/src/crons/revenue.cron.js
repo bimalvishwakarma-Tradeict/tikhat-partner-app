@@ -341,7 +341,12 @@ export async function creditInvestorForDate(investor, dateStr, cronJobId = null)
         investor.id,
         dateStr,
         amount,
-        Math.round(roiPercentage) || null,
+        (() => {
+          const roi = Number.parseFloat(String(roiPercentage));
+          return Number.isFinite(roi) && roi > 0
+            ? Number.parseFloat(roi.toFixed(2))
+            : null;
+        })(),
         Math.round(capitalAtTime),
         cronJobId,
       ]

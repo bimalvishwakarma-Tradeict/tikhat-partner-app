@@ -1,5 +1,8 @@
 -- Migration: 020_create_backdate_requests
 -- Tikhat Partner App — Backdate entries pending Super Admin approval
+-- NOTE: roi_percentage MUST be NUMERIC(5,2) — never INTEGER (supports 2.25, 4.50, etc.)
+-- Server upgrade (if already INTEGER):
+--   ALTER TABLE backdate_requests ALTER COLUMN roi_percentage TYPE NUMERIC(5,2) USING roi_percentage::NUMERIC(5,2);
 
 CREATE TABLE IF NOT EXISTS backdate_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -9,7 +12,7 @@ CREATE TABLE IF NOT EXISTS backdate_requests (
   type VARCHAR(30) NOT NULL,
   start_date DATE,
   end_date DATE,
-  roi_percentage INTEGER,
+  roi_percentage NUMERIC(5,2),
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
   status VARCHAR(20) NOT NULL DEFAULT 'pending',
   send_email_to_investor BOOLEAN NOT NULL DEFAULT FALSE,
@@ -52,3 +55,8 @@ CREATE INDEX IF NOT EXISTS idx_backdate_requests_type
   ON backdate_requests (type);
 CREATE INDEX IF NOT EXISTS idx_backdate_requests_created_at
   ON backdate_requests (created_at);
+
+-- Upgrade existing INTEGER column to NUMERIC(5,2) for decimal ROI (e.g. 2.25)
+ALTER TABLE backdate_requests
+  ALTER COLUMN roi_percentage TYPE NUMERIC(5,2)
+  USING roi_percentage::NUMERIC(5,2);
