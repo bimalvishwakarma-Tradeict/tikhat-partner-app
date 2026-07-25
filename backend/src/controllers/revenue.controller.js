@@ -77,9 +77,21 @@ function toPositiveInt(value, fallback) {
 function describeRevenueEntry(creditType, remark = null, options = {}) {
   const forInvestor = options.forInvestor !== false;
 
-  // Investors must never see "Backdate" / "Backdated" wording
+  // Investor-facing: never show "Backdate" / "Backdated".
+  // All credit entries are labeled "Revenue Credit".
+  if (forInvestor) {
+    if (creditType === 'manual_debit') {
+      return 'Admin revenue debit';
+    }
+    if (creditType === 'revenue_withdrawal') {
+      return 'Revenue withdrawal';
+    }
+    return 'Revenue Credit';
+  }
+
+  // Admin-facing labels (Backdated allowed)
   if (creditType === 'backdate') {
-    return forInvestor ? 'Revenue Credit' : 'Backdated revenue credit';
+    return 'Backdated revenue credit';
   }
 
   const base = {
@@ -90,19 +102,29 @@ function describeRevenueEntry(creditType, remark = null, options = {}) {
   }[creditType] || 'Revenue transaction';
 
   if (remark && String(remark).trim()) {
-    let cleaned = String(remark).trim();
-    if (forInvestor) {
-      cleaned = cleaned
-        .replace(/\bbackdated?\b/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .replace(/^[\s—\-]+|[\s—\-]+$/g, '')
-        .trim();
-    }
-    if (cleaned) {
-      return `${base} — ${cleaned}`;
-    }
+    return `${base} — ${String(remark).trim()}`;
   }
   return base;
+}
+
+/**
+ * Investor-safe public type for ledger rows (never "backdate").
+ * @param {string} creditType
+ * @param {boolean} forInvestor
+ * @returns {string}
+ */
+function publicRevenueType(creditType, forInvestor) {
+  if (!forInvestor) {
+    return creditType;
+  }
+  if (
+    creditType === 'backdate' ||
+    creditType === 'daily_auto' ||
+    creditType === 'manual_credit'
+  ) {
+    return 'revenue_credit';
+  }
+  return creditType;
 }
 
 /**
@@ -268,17 +290,23 @@ async function buildRevenueLedger(investorId, filters = {}) {
         ? row.entry_date.toISOString().slice(0, 10)
         : String(row.entry_date).slice(0, 10);
 
+    const forInvestor = filters.forAdmin !== true;
+    const description = describeRevenueEntry(type, row.remark, {
+      forInvestor,
+    });
+
     return {
       id: row.id,
       transaction_id: row.transaction_id,
       date: dateValue,
-      description: describeRevenueEntry(type, row.remark, {
-        forInvestor: filters.forAdmin !== true,
-      }),
+      description,
+      particular: description,
       credit_amount: creditAmount,
       debit_amount: debitAmount,
-      type,
-      is_backdated: type === 'backdate',
+      type: publicRevenueType(type, forInvestor),
+      credit_type: publicRevenueType(type, forInvestor),
+      // Never expose backdate flag to investors
+      is_backdated: forInvestor ? false : type === 'backdate',
       is_reversed: row.is_reversed === true,
       balance: running,
       sort_at:

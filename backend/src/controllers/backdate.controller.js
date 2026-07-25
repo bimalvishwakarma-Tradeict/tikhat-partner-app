@@ -1931,8 +1931,9 @@ export async function listBackdateRequests(req, res) {
 
 /**
  * Insert one backdated revenue credit + update monthly tracking.
- * credit_type stays 'backdate' for admin/audit. Investor-facing label is
- * mapped to "Revenue Credit" in revenue.controller (never "Backdated").
+ * credit_type stays 'backdate' for admin/audit only.
+ * No description/particular column on revenue_credits — investor APIs map
+ * credit_type=backdate → description "Revenue Credit" (never "Backdate").
  * @param {import('pg').PoolClient} client
  * @param {object} params
  */
@@ -1951,6 +1952,8 @@ async function insertBackdateCredit(client, params) {
     year,
   });
 
+  // Investor APIs map credit_type=backdate → "Revenue Credit" (never store
+  // Backdate wording in remarks — none set here).
   const insertResult = await client.query(
     `INSERT INTO revenue_credits (
        transaction_id,
