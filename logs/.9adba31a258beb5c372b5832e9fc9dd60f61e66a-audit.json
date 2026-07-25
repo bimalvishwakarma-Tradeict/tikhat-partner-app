@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "logs\\.9adba31a258beb5c372b5832e9fc9dd60f61e66a-audit.json",
+    "files": [
+        {
+            "date": 1784812164782,
+            "name": "logs\\tikhat-2026-07-23.log",
+            "hash": "fc5551c87efceeb90800c12fac748304b5c01ed72821489b6ba152fb76fb5fcb"
+        }
+    ],
+    "hashType": "sha256"
+}

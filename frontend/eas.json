@@ -1,0 +1,64 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      },
+      "ios": {
+        "buildConfiguration": "Debug",
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://tikhatpartner.online/api/v1"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://tikhatpartner.online/api/v1"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://tikhatpartner.online/api/v1"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      },
+      "ios": {
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID"
+      }
+    }
+  }
+}

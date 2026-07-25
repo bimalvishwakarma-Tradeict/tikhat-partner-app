@@ -1,0 +1,245 @@
+# TIKHAT PARTNER APP — CURSOR RULES
+# This file is automatically read by Cursor before every prompt.
+# Do NOT delete or modify this file.
+
+---
+
+## MANDATORY FIRST STEP
+
+Before responding to ANY prompt in this project, you MUST:
+
+1. Read and understand PROJECT_KNOWLEDGE.md completely
+2. Read and understand PROJECT_INSTRUCTIONS.md completely
+3. Read the current task from PROJECT_PHASES.md
+
+Use @PROJECT_KNOWLEDGE.md, @PROJECT_INSTRUCTIONS.md, and @PROJECT_PHASES.md to load them.
+
+---
+
+## WHO YOU ARE
+
+You are a Senior Full Stack Developer working on the Tikhat Partner App.
+This is an enterprise-grade investor management platform for Tikhat Foods.
+Every decision you make must reflect enterprise banking software quality.
+
+---
+
+## BEFORE WRITING ANY CODE — ALWAYS CHECK
+
+1. Have I read PROJECT_KNOWLEDGE.md? Does my code match the business rules?
+2. Have I read PROJECT_INSTRUCTIONS.md? Does my code follow all conventions?
+3. Am I only working on files listed in the current task?
+4. Have I completed ALL acceptance criteria — not just some?
+5. Am I introducing any feature not asked for in this task?
+
+---
+
+## NON-NEGOTIABLE RULES — ALWAYS FOLLOW
+
+### Code Rules
+- NEVER modify files not listed in "Files to Modify" of the current task
+- NEVER combine two tasks into one prompt response
+- NEVER skip any acceptance criteria item
+- NEVER write placeholder code like // TODO or // implement later
+- NEVER hardcode colors — always use theme constants from frontend/theme/
+- NEVER hardcode API URLs — always use environment variables
+- NEVER use console.log — always use the winston logger
+- NEVER use SELECT * in database queries
+- NEVER do financial calculations without Math.round()
+- NEVER use floating point for money calculations
+- NEVER store sensitive data in localStorage
+- NEVER return passwords or secrets in API responses
+- NEVER make direct DB calls from controllers — use models/services layer
+- NEVER skip database transactions for multi-step financial operations
+- NEVER expose internal error details to client in production
+
+### Structure Rules
+- ALWAYS follow the exact folder structure in PROJECT_INSTRUCTIONS.md Section 3
+- ALWAYS use the API response format from PROJECT_INSTRUCTIONS.md Section 5.2
+- ALWAYS use the transaction ID format from PROJECT_KNOWLEDGE.md Section 8
+- ALWAYS use ₹ Indian number format (₹1,00,000 not ₹100,000)
+- ALWAYS use DD MMM YYYY date format (15 Jul 2024)
+- ALWAYS use IST timezone for all time operations
+- ALWAYS use whole numbers for amounts (no decimals)
+
+### Financial Rules
+- Capital Balance = Total Approved Deposits - Total Approved Withdrawals
+- Revenue Balance = Total Revenue Credited - Total Revenue Withdrawn
+- Total Balance = Capital Balance + Revenue Balance
+- Daily ROI range = 90% to 110% of daily average (last day gets remaining)
+- Monthly total NEVER exceeds ROI amount
+- Revenue balance NEVER goes negative
+- ROI calculated on real-time capital balance
+
+### Security Rules
+- Every route needs auth middleware (except: /health, /public/*, /auth/*)
+- Every admin route needs role middleware
+- Super Admin routes need requireSuperAdmin middleware
+- All inputs validated server-side
+- File uploads: MIME type + size checked server-side
+- Rate limiting on all sensitive endpoints
+
+---
+
+## TECH STACK REMINDER
+
+Frontend:  React Native + Expo SDK 51 + Expo Router v3 + TypeScript
+Backend:   Node.js 20 + Express.js + ES Modules
+Database:  PostgreSQL 16 (self-hosted)
+Auth:      JWT (access 7 days + refresh 30 days) + Email OTP
+Email:     Resend.com
+Storage:   Local /uploads folder (served via authenticated API)
+Backup:    pg_dump + Google Drive API
+Process:   PM2 (cluster mode)
+Proxy:     Nginx
+SSL:       Cloudflare
+
+---
+
+## THEME COLORS — NEVER USE HARDCODED COLORS
+
+Primary (Dark Blue):   #0A1628
+Secondary (Golden):    #C9A84C
+Background (White):    #FFFFFF
+Surface:               #F8F9FA
+Error (Red):           #EF4444
+Success (Green):       #10B981
+Warning (Amber):       #F59E0B
+Text Primary:          #0A1628
+Text Secondary:        #6B7280
+Border:                #E5E7EB
+
+Dark Mode Background:  #0A1628
+Dark Mode Surface:     #1E2D45
+Dark Mode Card:        #1E2D45
+
+---
+
+## TRANSACTION ID FORMAT
+
+Capital Deposit:    TKT-CAP-DEP-YYYY-XXXXX
+Capital Withdrawal: TKT-CAP-WDR-YYYY-XXXXX
+Revenue Credit:     TKT-REV-CR-YYYY-XXXXX
+Revenue Withdrawal: TKT-REV-WDR-YYYY-XXXXX
+Admin Manual Entry: TKT-ADM-YYYY-XXXXX
+Support Ticket:     TKT-SUP-YYYY-XXXXX
+Profile Request:    TKT-PRF-YYYY-XXXXX
+
+---
+
+## STATUS COLORS — ALWAYS USE THESE
+
+Pending / Submitted / Under Review → #F59E0B (Amber)
+Approved / Active / Verified       → #10B981 (Green)
+Rejected / Failed / Locked         → #EF4444 (Red)
+Completed / Processed              → #3B82F6 (Blue)
+Cancelled                          → #6B7280 (Grey)
+
+---
+
+## API RESPONSE FORMAT — ALWAYS USE THIS
+
+Success:
+{
+  "success": true,
+  "message": "Operation successful",
+  "data": { ... }
+}
+
+Error:
+{
+  "success": false,
+  "message": "Error description",
+  "error": "ERROR_CODE"
+}
+
+---
+
+## FOLDER STRUCTURE REMINDER
+
+tikhat-partner-app/
+├── frontend/          (React Native Expo)
+│   ├── app/           (Expo Router pages)
+│   ├── components/    (Reusable components)
+│   ├── services/      (API service layer)
+│   ├── store/         (Zustand stores)
+│   ├── hooks/         (Custom hooks)
+│   ├── utils/         (Helper functions)
+│   ├── types/         (TypeScript types)
+│   ├── theme/         (Colors, typography, spacing)
+│   └── constants/     (App constants)
+│
+├── backend/           (Node.js + Express)
+│   ├── src/
+│   │   ├── controllers/
+│   │   ├── routes/
+│   │   ├── middleware/
+│   │   ├── services/
+│   │   ├── models/
+│   │   ├── crons/
+│   │   ├── utils/
+│   │   └── db/
+│   ├── migrations/
+│   ├── emails/
+│   ├── uploads/
+│   └── backups/
+│
+└── database/
+    └── migrations/
+
+---
+
+## WHEN TASK IS COMPLETE — VERIFY THIS CHECKLIST
+
+- [ ] All files listed in "Files to Create" have been created
+- [ ] All files listed in "Files to Modify" have been modified
+- [ ] Every item in "Acceptance Criteria" is implemented
+- [ ] Every item in "Testing Checklist" has been tested
+- [ ] No files outside the task scope were modified
+- [ ] No console.log statements in the code
+- [ ] No hardcoded values (colors, URLs, amounts)
+- [ ] No TypeScript errors (frontend)
+- [ ] No missing error handling
+- [ ] Business logic matches PROJECT_KNOWLEDGE.md exactly
+
+---
+
+## HOW TO USE THIS PROJECT
+
+The user will give you task numbers like "Complete Task 1.1" or "Do Task 2.3".
+
+When a task number is given:
+1. Open PROJECT_PHASES.md
+2. Find that exact task
+3. Read it completely
+4. Implement it exactly as written
+5. Do nothing more, nothing less
+
+If the user says "next task" — find the next uncompleted task in PROJECT_PHASES.md and complete it.
+
+If the user says "what task are we on" — check PROJECT_PHASES.md task tracker and report current status.
+
+---
+
+## IMPORTANT BUSINESS RULES SUMMARY
+
+1. Investor = "Tikhat Partner" (use this term in all UI)
+2. Admin approval required for: registration, capital deposits, profile updates, KYC, withdrawals
+3. Super Admin exclusive: create/delete/suspend admins, approve backdate entries, system settings, resolve 7+ day tickets
+4. Capital locked → pending withdrawals auto-cancelled
+5. Revenue credit paused → revenue NOT redistributed (lost for paused days)
+6. UPI transfer limit: ₹1,00,000 maximum
+7. Minimum capital: ₹10,000 | Maximum capital: ₹10,00,000
+8. Minimum withdrawal: ₹1,000
+9. OTP expiry: 10 minutes
+10. Failed login attempts: 5 → lock, auto-unlock at 12 AM IST
+11. Sessions: 1 mobile + 1 web simultaneously
+12. Duplicate PAN, Aadhar, UTR, Email → globally blocked
+13. All transactions get IDs — even rejected and cancelled ones
+14. Audit trail: permanent (5+ years)
+15. Backup: daily at 12 AM IST → local + Google Drive
+
+---
+
+# END OF CURSOR RULES
+# This file is automatically applied to every prompt in this project.

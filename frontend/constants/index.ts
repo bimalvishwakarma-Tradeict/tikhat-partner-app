@@ -1,0 +1,16 @@
+export const APP_NAME = 'Tikhat Partner';
+export const COMPANY_NAME = 'Tikhat Foods';
+export const DOMAIN = 'tikhatpartner.online';
+export const INVESTOR_TERM = 'Tikhat Partner';
+export const CURRENCY_SYMBOL = '₹';
+export const DATE_FORMAT = 'dd MMM yyyy';
+export const TIME_FORMAT = 'h:mm a';
+export const TIMEZONE = 'Asia/Kolkata';
+export const LANGUAGE = 'en';
+export const MIN_CAPITAL_DEPOSIT = 10000;
+export const MAX_CAPITAL_DEPOSIT = 1000000;
+export const MIN_WITHDRAWAL = 1000;
+export const UPI_TRANSFER_LIMIT = 100000;
+export const OTP_EXPIRY_MINUTES = 10;
+export const MAX_LOGIN_ATTEMPTS = 5;
+export const MAX_FILE_SIZE_MB = 5;
