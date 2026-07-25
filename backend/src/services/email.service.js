@@ -55,8 +55,54 @@ const DATE_FIELDS = ['creditDate', 'date', 'transactionDate'];
 const templateCache = new Map();
 const pendingDeliveries = new Map();
 
+/** Serialize Resend API calls (~6/sec) to stay under Resend's 10 req/sec limit. */
+const EMAIL_SEND_GAP_MS = 150;
+const emailSendQueue = [];
+let isProcessingEmailQueue = false;
+
 let resendClient = null;
 let schemaReady = false;
+
+/**
+ * Process queued Resend sends with a gap between each attempt.
+ */
+async function processEmailSendQueue() {
+  if (isProcessingEmailQueue) {
+    return;
+  }
+  isProcessingEmailQueue = true;
+  try {
+    while (emailSendQueue.length > 0) {
+      const job = emailSendQueue.shift();
+      try {
+        const result = await job.run();
+        job.resolve(result);
+      } catch (error) {
+        job.reject(error);
+      }
+      if (emailSendQueue.length > 0) {
+        await new Promise((resolve) => setTimeout(resolve, EMAIL_SEND_GAP_MS));
+      }
+    }
+  } finally {
+    isProcessingEmailQueue = false;
+    if (emailSendQueue.length > 0) {
+      void processEmailSendQueue();
+    }
+  }
+}
+
+/**
+ * Enqueue a Resend send so bulk callers (e.g. backdate approval) cannot burst.
+ * @param {() => Promise<unknown>} run
+ * @returns {Promise<unknown>}
+ */
+function enqueueResendSend(run) {
+  return new Promise((resolve, reject) => {
+    emailSendQueue.push({ run, resolve, reject });
+    void processEmailSendQueue();
+  });
+}
 
 /**
  * @returns {Resend}
@@ -310,30 +356,34 @@ async function renderTemplateHtml(templateName, data) {
 
 /**
  * Send via Resend (or throw).
+ * Goes through the rate-limit queue (150ms between sends).
+ * Used by sendEmail, retry cron, and admin failure alerts.
  * @param {object} params
  */
 async function sendViaResend({ to, subject, html, forceFail }) {
-  if (forceFail) {
-    throw new Error('Forced email failure (test)');
-  }
+  return enqueueResendSend(async () => {
+    if (forceFail) {
+      throw new Error('Forced email failure (test)');
+    }
 
-  const resend = getResend();
-  const { data, error } = await resend.emails.send({
-    from: FROM_ADDRESS,
-    to: [to],
-    subject,
-    html,
+    const resend = getResend();
+    const { data, error } = await resend.emails.send({
+      from: FROM_ADDRESS,
+      to: [to],
+      subject,
+      html,
+    });
+
+    if (error) {
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String(error.message)
+          : String(error);
+      throw new Error(message);
+    }
+
+    return data;
   });
-
-  if (error) {
-    const message =
-      typeof error === 'object' && error !== null && 'message' in error
-        ? String(error.message)
-        : String(error);
-    throw new Error(message);
-  }
-
-  return data;
 }
 
 /**
@@ -562,6 +612,7 @@ export async function attemptEmailDelivery(logId, onSettled = null) {
  * Queue and send an email via Resend.
  * OTP / approval / rejection wait for first attempt; others are non-blocking.
  * Retries are handled by the email retry cron (every 5 minutes).
+ * Resend calls are serialized with a 150ms gap via enqueueResendSend.
  *
  * @param {string} to
  * @param {string} templateName
