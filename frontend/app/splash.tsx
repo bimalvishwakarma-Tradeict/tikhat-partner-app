@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,58 +13,71 @@ import Animated, {
 } from 'react-native-reanimated';
 
 const HOME_HREF = '/(auth)' as Href;
-const FALLBACK_TIMEOUT_MS = 4000;
+const FALLBACK_TIMEOUT_MS = 15000;
 const SPLASH_BG = '#0A1628';
 
 export type SplashScreenProps = {
   /** 1 = fully visible, 0 = faded out (boot overlay from root layout) */
   opacity?: SharedValue<number>;
+  /** Called when video finishes (or fallback timeout) — used by boot overlay */
+  onComplete?: () => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 };
 
 /**
- * Full-screen splash video. Used as boot overlay and at `/splash`.
+ * Full-screen splash video. Plays completely before navigation / onComplete.
  */
-export function SplashScreen({ opacity, style, testID }: SplashScreenProps) {
+export function SplashScreen({
+  opacity,
+  onComplete,
+  style,
+  testID,
+}: SplashScreenProps) {
   const router = useRouter();
-  const finishedRef = useRef(false);
+  const videoRef = useRef<Video>(null);
+  const isNavigatingRef = useRef(false);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
-  const finish = useCallback(() => {
-    if (finishedRef.current) {
+  const navigateNext = useCallback(() => {
+    if (isNavigatingRef.current) {
       return;
     }
-    finishedRef.current = true;
+    isNavigatingRef.current = true;
+    setIsNavigating(true);
 
-    // Boot overlay: root layout dismisses via opacity fade — skip route replace.
-    if (opacity) {
+    if (onCompleteRef.current) {
+      onCompleteRef.current();
       return;
     }
 
     try {
       router.replace(HOME_HREF);
     } catch {
-      // Ignore navigation errors if already transitioning.
+      // Ignore if already transitioning
     }
-  }, [opacity, router]);
+  }, [router]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      finish();
+      navigateNext();
     }, FALLBACK_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [finish]);
+  }, [navigateNext]);
 
-  const onPlaybackStatusUpdate = useCallback(
+  const handlePlaybackUpdate = useCallback(
     (status: AVPlaybackStatus) => {
-      if (!status.isLoaded) {
-        return;
-      }
-      if (status.didJustFinish) {
-        finish();
+      if (
+        status.isLoaded &&
+        status.didJustFinish === true &&
+        !isNavigating
+      ) {
+        navigateNext();
       }
     },
-    [finish]
+    [isNavigating, navigateNext]
   );
 
   const rootStyle = useAnimatedStyle(() => ({
@@ -78,13 +91,14 @@ export function SplashScreen({ opacity, style, testID }: SplashScreenProps) {
     >
       <View style={styles.videoWrap}>
         <Video
+          ref={videoRef}
           source={require('@/assets/Splash.mp4')}
           style={styles.video}
           resizeMode={ResizeMode.COVER}
           shouldPlay
           isLooping={false}
           isMuted
-          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          onPlaybackStatusUpdate={handlePlaybackUpdate}
         />
       </View>
     </Animated.View>

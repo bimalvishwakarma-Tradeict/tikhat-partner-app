@@ -33,7 +33,6 @@ import { markDataSynced } from '../utils/lastSynced';
 const HOME_HREF = '/(auth)/' as Href;
 const PARTNER_DASHBOARD_HREF = '/(partner)/dashboard' as Href;
 const ADMIN_DASHBOARD_HREF = '/(admin)/dashboard' as Href;
-const SPLASH_MIN_MS = 2000;
 const SPLASH_FADE_MS = 420;
 
 /**
@@ -137,19 +136,44 @@ function BootRoot() {
   const [bootComplete, setBootComplete] = useState(false);
   const splashOpacity = useSharedValue(1);
   const started = useRef(false);
+  const hydrateDone = useRef(false);
+  const videoDone = useRef(false);
+  const dismissing = useRef(false);
 
   const finishSplash = useCallback(() => {
     setShowSplash(false);
     setBootComplete(true);
   }, []);
 
+  const tryDismissSplash = useCallback(() => {
+    if (dismissing.current) {
+      return;
+    }
+    if (!hydrateDone.current || !videoDone.current) {
+      return;
+    }
+    dismissing.current = true;
+    splashOpacity.value = withTiming(
+      0,
+      { duration: SPLASH_FADE_MS, easing: Easing.out(Easing.cubic) },
+      (finished) => {
+        if (finished) {
+          runOnJS(finishSplash)();
+        }
+      }
+    );
+  }, [splashOpacity, finishSplash]);
+
+  const onSplashVideoComplete = useCallback(() => {
+    videoDone.current = true;
+    tryDismissSplash();
+  }, [tryDismissSplash]);
+
   useEffect(() => {
     if (started.current) {
       return;
     }
     started.current = true;
-
-    const startedAt = Date.now();
 
     (async () => {
       await hydrate();
@@ -159,25 +183,14 @@ function BootRoot() {
         await logout();
       }
 
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, SPLASH_MIN_MS - elapsed);
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, remaining);
-      });
-
-      splashOpacity.value = withTiming(
-        0,
-        { duration: SPLASH_FADE_MS, easing: Easing.out(Easing.cubic) },
-        (finished) => {
-          if (finished) {
-            runOnJS(finishSplash)();
-          }
-        }
-      );
+      hydrateDone.current = true;
+      tryDismissSplash();
     })().catch(() => {
+      hydrateDone.current = true;
+      videoDone.current = true;
       finishSplash();
     });
-  }, [hydrate, logout, splashOpacity, finishSplash]);
+  }, [hydrate, logout, tryDismissSplash, finishSplash]);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
@@ -210,7 +223,13 @@ function BootRoot() {
         <Slot />
       </AuthGate>
       <Toast />
-      {showSplash ? <SplashScreen opacity={splashOpacity} testID="boot-splash" /> : null}
+      {showSplash ? (
+        <SplashScreen
+          opacity={splashOpacity}
+          onComplete={onSplashVideoComplete}
+          testID="boot-splash"
+        />
+      ) : null}
     </View>
   );
 }
