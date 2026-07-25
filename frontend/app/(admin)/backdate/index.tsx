@@ -92,6 +92,12 @@ function parseOptionalInt(value?: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function parseOptionalFloat(value?: string): number | undefined {
+  if (value == null || !String(value).trim()) return undefined;
+  const n = Number.parseFloat(String(value));
+  return Number.isFinite(n) ? Number.parseFloat(n.toFixed(2)) : undefined;
+}
+
 function enumerateDates(start: string, end: string): string[] {
   const out: string[] = [];
   const cur = new Date(`${start}T00:00:00+05:30`);
@@ -237,7 +243,7 @@ export default function AdminBackdateIndexScreen() {
         investor_id: selectedInvestor.id,
         date: values.date,
         amount: parseOptionalInt(values.amount),
-        roi_percentage: parseOptionalInt(values.roi_percentage),
+        roi_percentage: parseOptionalFloat(values.roi_percentage),
         remark: values.remark?.trim() || undefined,
         send_email: sendEmail,
       });
@@ -267,7 +273,7 @@ export default function AdminBackdateIndexScreen() {
       )) as { capitalBalance?: number };
       const capital = Math.round(Number(cap.capitalBalance) || 0);
       const roi =
-        parseOptionalInt(values.roi_percentage) ||
+        parseOptionalFloat(values.roi_percentage) ||
         2;
       const monthly = Math.round((capital * roi) / 100);
       // Group by month for preview estimate
@@ -323,7 +329,7 @@ export default function AdminBackdateIndexScreen() {
         investor_id: selectedInvestor.id,
         start_date: values.start_date,
         end_date: values.end_date,
-        roi_percentage: parseOptionalInt(values.roi_percentage),
+        roi_percentage: parseOptionalFloat(values.roi_percentage),
         remark: values.remark?.trim() || undefined,
         send_email: sendEmail,
       })) as { preview?: { distribution?: PreviewRow[]; expected_total?: number } };
@@ -430,7 +436,9 @@ export default function AdminBackdateIndexScreen() {
         password: values.password,
         joining_date: values.joining_date,
         initial_capital: Math.round(Number(values.initial_capital) || 0),
-        roi_percentage: Math.round(Number(values.roi_percentage) || 0),
+        roi_percentage: Number.parseFloat(
+          Number.parseFloat(String(values.roi_percentage)).toFixed(2)
+        ),
         pan_number: values.pan_number?.trim() || undefined,
         aadhar_number: values.aadhar_number?.trim() || undefined,
         address: values.address?.trim() || undefined,
@@ -624,7 +632,8 @@ export default function AdminBackdateIndexScreen() {
             control={singleForm.control}
             name="roi_percentage"
             label="ROI % (optional)"
-            keyboardType="number-pad"
+            keyboardType="decimal-pad"
+            placeholder="e.g. 2.25"
           />
           <FormTextArea
             control={singleForm.control}
@@ -657,7 +666,8 @@ export default function AdminBackdateIndexScreen() {
             control={bulkForm.control}
             name="roi_percentage"
             label="ROI % (optional)"
-            keyboardType="number-pad"
+            keyboardType="decimal-pad"
+            placeholder="e.g. 2.25"
           />
           <FormTextArea control={bulkForm.control} name="remark" label="Remark" />
           {emailToggle}
@@ -773,7 +783,8 @@ export default function AdminBackdateIndexScreen() {
             control={newForm.control}
             name="roi_percentage"
             label="ROI %"
-            keyboardType="number-pad"
+            keyboardType="decimal-pad"
+            placeholder="e.g. 2.25"
           />
           <FormInput
             control={newForm.control}

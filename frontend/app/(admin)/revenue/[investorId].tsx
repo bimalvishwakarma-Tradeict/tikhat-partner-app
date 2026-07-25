@@ -22,7 +22,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { revenueService } from '../../../services/revenue.service';
 import { ApiClientError } from '../../../types/api.types';
 import type { CreditSettings, RoiTerm } from '../../../types/models.types';
-import { formatCurrency } from '../../../utils/formatCurrency';
+import { formatCurrency, formatRoiPercent } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
 import { zodResolver } from '../../../utils/validationSchemas';
 import { FormDatePicker } from '../../../components/forms/FormDatePicker';
@@ -104,11 +104,17 @@ function confirmAction(title: string, message: string): Promise<boolean> {
 function roiPercent(value: SummaryData['roi']): string {
   const def = value?.defaultRoi;
   if (def == null) return '—';
-  if (typeof def === 'number') return `${def}%`;
+  if (typeof def === 'number') return formatRoiPercent(def);
   if (typeof def === 'object' && def.roi_percentage != null) {
-    return `${def.roi_percentage}%`;
+    return formatRoiPercent(def.roi_percentage);
   }
   return '—';
+}
+
+function termRoiValue(term: RoiTerm & { roi_percentage?: number }): number {
+  return Number.parseFloat(
+    String(term.percentage ?? term.roi_percentage ?? NaN)
+  );
 }
 
 /**
@@ -184,22 +190,29 @@ export default function AdminRevenueDetailScreen() {
         setSummary(sum);
         const rows = tx.transactions || tx.entries || [];
         setLedger(rows as LedgerRow[]);
-        const termList =
-          (roi.terms as RoiTerm[]) ||
-          (sum.roi?.terms as RoiTerm[]) ||
-          [];
+        const termList = (
+          (roi.terms as (RoiTerm & { roi_percentage?: number })[]) ||
+          (sum.roi?.terms as (RoiTerm & { roi_percentage?: number })[]) ||
+          []
+        ).map((term) => ({
+          ...term,
+          percentage: Number.parseFloat(
+            String(term.percentage ?? term.roi_percentage ?? 0)
+          ),
+        }));
         setTerms(termList);
 
         const def = sum.roi?.defaultRoi;
-        const defPct =
-          typeof def === 'number'
-            ? def
-            : def && typeof def === 'object'
-              ? Number(def.roi_percentage)
-              : Number(
-                  (roi as { defaultRoi?: { roi_percentage?: number } })
+        const defPct = Number.parseFloat(
+          String(
+            typeof def === 'number'
+              ? def
+              : def && typeof def === 'object'
+                ? def.roi_percentage
+                : (roi as { defaultRoi?: { roi_percentage?: number } })
                     .defaultRoi?.roi_percentage
-                );
+          )
+        );
         if (Number.isFinite(defPct) && defPct > 0) {
           defaultForm.reset({ percentage: defPct });
         }
@@ -240,14 +253,15 @@ export default function AdminRevenueDetailScreen() {
   }, [navigation, summary?.investor?.full_name]);
 
   const saveDefaultRoi = defaultForm.handleSubmit(async (values) => {
+    const pct = Number.parseFloat(String(values.percentage));
     const ok = await confirmAction(
       'Update default ROI',
-      `Set default ROI to ${values.percentage}%?`
+      `Set default ROI to ${formatRoiPercent(pct)}?`
     );
     if (!ok) return;
     setBusy('roi');
     try {
-      await revenueService.setDefaultRoi(investorId, Math.round(values.percentage));
+      await revenueService.setDefaultRoi(investorId, pct);
       toast.success('Default ROI updated');
       await load(true);
     } catch (err) {
@@ -258,15 +272,16 @@ export default function AdminRevenueDetailScreen() {
   });
 
   const saveTerm = termForm.handleSubmit(async (values) => {
+    const pct = Number.parseFloat(String(values.percentage));
     const ok = await confirmAction(
       'Add ROI term',
-      `${values.percentage}% from ${values.start_date} to ${values.end_date}?`
+      `${formatRoiPercent(pct)} from ${values.start_date} to ${values.end_date}?`
     );
     if (!ok) return;
     setBusy('term');
     try {
       await revenueService.addRoiTerm(investorId, {
-        percentage: Math.round(values.percentage),
+        percentage: pct,
         start_date: values.start_date,
         end_date: values.end_date,
       });
@@ -449,8 +464,11 @@ export default function AdminRevenueDetailScreen() {
               { color: colors.text.secondary, marginTop: spacing.xs },
             ]}
           >
-            Active ROI: {summary?.roi?.activePercentage ?? '—'}% · Default:{' '}
-            {roiPercent(summary?.roi)}
+            Active ROI:{' '}
+            {summary?.roi?.activePercentage != null
+              ? formatRoiPercent(summary.roi.activePercentage)
+              : '—'}{' '}
+            · Default: {roiPercent(summary?.roi)}
           </Text>
         </Card>
 
@@ -467,8 +485,8 @@ export default function AdminRevenueDetailScreen() {
             control={defaultForm.control}
             name="percentage"
             label="ROI %"
-            keyboardType="numeric"
-            placeholder="e.g. 2"
+            keyboardType="decimal-pad"
+            placeholder="e.g. 2.25"
           />
           <Button
             title="Save default ROI"
@@ -516,7 +534,7 @@ export default function AdminRevenueDetailScreen() {
                       { color: colors.text.primary, fontWeight: '600' },
                     ]}
                   >
-                    {term.percentage}%
+                    {formatRoiPercent(termRoiValue(term))}
                   </Text>
                   <Text
                     style={[typography.caption, { color: colors.text.secondary }]}
@@ -731,7 +749,8 @@ export default function AdminRevenueDetailScreen() {
                 control={termForm.control}
                 name="percentage"
                 label="ROI %"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
+                placeholder="e.g. 2.25"
               />
               <FormDatePicker
                 control={termForm.control}

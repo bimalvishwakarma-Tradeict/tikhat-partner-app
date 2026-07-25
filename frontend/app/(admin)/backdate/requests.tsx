@@ -17,7 +17,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useTheme } from '../../../hooks/useTheme';
 import { adminService } from '../../../services/admin.service';
 import { ApiClientError } from '../../../types/api.types';
-import { formatCurrency } from '../../../utils/formatCurrency';
+import { formatCurrency, formatRoiPercent } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
@@ -320,7 +320,9 @@ export default function AdminBackdateRequestsScreen() {
                 {item.end_date && item.end_date !== item.start_date
                   ? ` → ${formatDate(item.end_date)}`
                   : ''}
-                {item.roi_percentage != null ? ` · ROI ${item.roi_percentage}%` : ''}
+                {item.roi_percentage != null
+                  ? ` · ROI ${formatRoiPercent(item.roi_percentage)}`
+                  : ''}
               </Text>
               <Text
                 style={[

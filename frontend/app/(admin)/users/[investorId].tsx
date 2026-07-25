@@ -25,6 +25,7 @@ import { apiDelete } from '../../../services/api';
 import { ApiClientError } from '../../../types/api.types';
 import type { Investor, ProfileUpdateRequest } from '../../../types/models.types';
 import { formatDate } from '../../../utils/formatDate';
+import { formatRoiPercent } from '../../../utils/formatCurrency';
 import { zodResolver } from '../../../utils/validationSchemas';
 import { FormDatePicker } from '../../../components/forms/FormDatePicker';
 import { AmountDisplay } from '../../../components/common/AmountDisplay';
@@ -525,9 +526,9 @@ export default function AdminInvestorDetailScreen() {
             label="Default ROI"
             value={
               roi?.default_roi != null
-                ? `${Number(roi.default_roi)}%`
+                ? formatRoiPercent(roi.default_roi)
                 : capital?.effective_roi != null
-                  ? `${Number(capital.effective_roi)}%`
+                  ? formatRoiPercent(capital.effective_roi)
                   : null
             }
           />
@@ -535,7 +536,7 @@ export default function AdminInvestorDetailScreen() {
             label="Effective ROI"
             value={
               capital?.effective_roi != null
-                ? `${Number(capital.effective_roi)}%`
+                ? formatRoiPercent(capital.effective_roi)
                 : null
             }
           />

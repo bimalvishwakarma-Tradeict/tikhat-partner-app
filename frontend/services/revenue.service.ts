@@ -62,16 +62,51 @@ export const revenueService = {
   },
 
   async getInvestorRoi(investorId: string): Promise<RoiData> {
-    return apiGet<RoiData>(`${ADMIN}/investor/${investorId}/roi`);
+    const data = (await apiGet(
+      `${ADMIN}/investor/${investorId}/roi`
+    )) as Record<string, unknown>;
+
+    const toFloat = (value: unknown): number | null => {
+      if (value == null || value === '') return null;
+      const n = Number.parseFloat(String(value));
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const defaultRoiRaw = data.defaultRoi;
+    if (defaultRoiRaw && typeof defaultRoiRaw === 'object') {
+      const row = defaultRoiRaw as Record<string, unknown>;
+      data.defaultRoi = {
+        ...row,
+        roi_percentage: toFloat(row.roi_percentage),
+      };
+    } else if (defaultRoiRaw != null) {
+      data.defaultRoi = toFloat(defaultRoiRaw);
+    }
+
+    if (Array.isArray(data.terms)) {
+      data.terms = data.terms.map((term) => {
+        const row = term as Record<string, unknown>;
+        const pct =
+          toFloat(row.percentage) ?? toFloat(row.roi_percentage) ?? 0;
+        return { ...row, percentage: pct, roi_percentage: pct };
+      });
+    }
+
+    if (data.activePercentage != null) {
+      data.activePercentage = toFloat(data.activePercentage);
+    }
+
+    return data as unknown as RoiData;
   },
 
   async setDefaultRoi(
     investorId: string,
     percentage: number
   ): Promise<unknown> {
+    const pct = Number.parseFloat(String(percentage));
     return apiPost(`${ADMIN}/investor/${investorId}/roi/default`, {
-      percentage,
-      roi_percentage: percentage,
+      percentage: pct,
+      roi_percentage: pct,
     });
   },
 
@@ -83,9 +118,10 @@ export const revenueService = {
       end_date: string;
     }
   ): Promise<unknown> {
+    const pct = Number.parseFloat(String(payload.percentage));
     return apiPost(`${ADMIN}/investor/${investorId}/roi/term`, {
-      percentage: payload.percentage,
-      roi_percentage: payload.percentage,
+      percentage: pct,
+      roi_percentage: pct,
       start_date: payload.start_date,
       end_date: payload.end_date,
     });

@@ -12,7 +12,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useTheme } from '../../../hooks/useTheme';
 import { revenueService } from '../../../services/revenue.service';
 import { ApiClientError } from '../../../types/api.types';
-import { formatCurrency } from '../../../utils/formatCurrency';
+import { formatCurrency, formatRoiPercent } from '../../../utils/formatCurrency';
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -271,8 +271,13 @@ export default function AdminRevenueIndexScreen() {
                 ]}
               >
                 Default ROI:{' '}
-                {item.default_roi != null ? `${item.default_roi}%` : '—'} · Term
-                ROI: {item.active_roi != null ? `${item.active_roi}%` : '—'}
+                {item.default_roi != null
+                  ? formatRoiPercent(item.default_roi)
+                  : '—'}{' '}
+                · Term ROI:{' '}
+                {item.active_roi != null
+                  ? formatRoiPercent(item.active_roi)
+                  : '—'}
               </Text>
               <Text
                 style={[
