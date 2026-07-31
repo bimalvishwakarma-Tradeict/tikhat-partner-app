@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Redirect, useFocusEffect, type Href } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTheme } from '../../../hooks/useTheme';
 import { adminService } from '../../../services/admin.service';
@@ -47,6 +47,7 @@ function parseMaintenance(value: unknown): boolean {
 export default function AdminSettingsScreen() {
   const { isSuperAdmin } = useAuth();
   const { colors, spacing, typography, borderRadius } = useTheme();
+  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -434,6 +435,50 @@ export default function AdminSettingsScreen() {
         <Text
           style={[
             typography.h3,
+            { color: colors.text.primary, marginBottom: spacing.sm },
+          ]}
+        >
+          Email Notifications
+        </Text>
+        <Text
+          style={[
+            typography.body,
+            { color: colors.text.secondary, marginBottom: spacing.md },
+          ]}
+        >
+          Control which automated emails are sent to investors
+        </Text>
+        <Pressable
+          onPress={() => {
+            router.push('/(admin)/settings/email-notifications' as Href);
+          }}
+          style={[
+            styles.menuLink,
+            {
+              borderColor: colors.border,
+              borderRadius: borderRadius.md,
+              backgroundColor: colors.surface,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              typography.body,
+              { color: colors.text.primary, fontWeight: '700', flex: 1 },
+            ]}
+          >
+            Email Notifications
+          </Text>
+          <Text style={[typography.body, { color: colors.secondary }]}>
+            Open →
+          </Text>
+        </Pressable>
+      </Card>
+
+      <Card>
+        <Text
+          style={[
+            typography.h3,
             { color: colors.text.primary, marginBottom: spacing.md },
           ]}
         >
@@ -733,6 +778,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  menuLink: {
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   adminRow: {
     borderWidth: 1,

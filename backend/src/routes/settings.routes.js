@@ -22,6 +22,8 @@ import {
   getTermsHistory,
   triggerManualBackup,
   listBackupHistory,
+  getEmailNotificationSettings,
+  patchEmailNotificationSettings,
 } from '../controllers/settings.controller.js';
 
 /** Mounted at /api/v1/admin/settings */
@@ -49,6 +51,13 @@ settingsRouter.patch('/privacy', requireSuperAdmin, patchPrivacy);
 
 settingsRouter.get('/backup/history', listBackupHistory);
 settingsRouter.post('/backup', requireSuperAdmin, triggerManualBackup);
+
+settingsRouter.get('/email-notifications', getEmailNotificationSettings);
+settingsRouter.patch(
+  '/email-notifications',
+  requireSuperAdmin,
+  patchEmailNotificationSettings
+);
 
 export default settingsRouter;
 

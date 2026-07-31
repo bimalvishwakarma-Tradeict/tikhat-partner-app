@@ -27,6 +27,33 @@ const EMAIL_RETRY_CRON = '*/5 * * * *';
 
 const IMMEDIATE_TEMPLATES = new Set(['otp', 'approval', 'rejection']);
 
+/** Investor email notification toggles in global_settings (defaults). */
+export const EMAIL_NOTIFICATION_DEFAULTS = Object.freeze({
+  email_on_registration: true,
+  email_on_approval: true,
+  email_on_rejection: true,
+  email_on_capital_deposit: true,
+  email_on_capital_withdrawal: true,
+  email_on_revenue_credit: true,
+  email_on_revenue_withdrawal: true,
+  email_on_support_ticket: true,
+  email_on_support_reply: true,
+  email_on_support_closed: true,
+  email_on_kyc_update: true,
+  email_on_account_pause: false,
+  email_on_profile_update: true,
+});
+
+export const EMAIL_NOTIFICATION_KEYS = Object.freeze(
+  Object.keys(EMAIL_NOTIFICATION_DEFAULTS)
+);
+
+const EMAIL_NOTIFICATION_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** @type {Record<string, boolean> | null} */
+let emailNotificationSettingsCache = null;
+let emailNotificationSettingsCachedAt = 0;
+
 const TEMPLATE_FILES = Object.freeze({
   approval: 'approval.email.jsx',
   rejection: 'rejection.email.jsx',
@@ -609,6 +636,232 @@ export async function attemptEmailDelivery(logId, onSettled = null) {
 }
 
 /**
+ * Clear in-memory email notification toggle cache.
+ */
+export function invalidateEmailNotificationSettingsCache() {
+  emailNotificationSettingsCache = null;
+  emailNotificationSettingsCachedAt = 0;
+}
+
+/**
+ * @param {unknown} value
+ * @param {boolean} fallback
+ * @returns {boolean}
+ */
+function parseEmailToggle(value, fallback) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (value == null || value === '') {
+    return fallback;
+  }
+  const s = String(value).trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'on' || s === 'yes') {
+    return true;
+  }
+  if (s === 'false' || s === '0' || s === 'off' || s === 'no') {
+    return false;
+  }
+  return fallback;
+}
+
+/**
+ * Load email notification toggles (cached 5 minutes).
+ * @returns {Promise<Record<string, boolean>>}
+ */
+async function getEmailNotificationSettingsCached() {
+  const now = Date.now();
+  if (
+    emailNotificationSettingsCache &&
+    now - emailNotificationSettingsCachedAt < EMAIL_NOTIFICATION_CACHE_TTL_MS
+  ) {
+    return emailNotificationSettingsCache;
+  }
+
+  const result = await query(
+    `SELECT key, value
+     FROM global_settings
+     WHERE key = ANY($1::text[])`,
+    [EMAIL_NOTIFICATION_KEYS]
+  );
+
+  /** @type {Record<string, boolean>} */
+  const map = {};
+  for (const key of EMAIL_NOTIFICATION_KEYS) {
+    map[key] = EMAIL_NOTIFICATION_DEFAULTS[key] !== false;
+  }
+  for (const row of result.rows) {
+    if (Object.prototype.hasOwnProperty.call(map, row.key)) {
+      map[row.key] = parseEmailToggle(
+        row.value,
+        EMAIL_NOTIFICATION_DEFAULTS[row.key] !== false
+      );
+    }
+  }
+
+  emailNotificationSettingsCache = map;
+  emailNotificationSettingsCachedAt = now;
+  return map;
+}
+
+/**
+ * Resolve which global_settings toggle gates this outbound email.
+ * Returns null when the email should always send (OTP, admin alerts, etc.).
+ * @param {string} templateName
+ * @param {Record<string, unknown>} data
+ * @returns {string | null}
+ */
+function resolveEmailNotificationSettingKey(templateName, data = {}) {
+  if (
+    typeof data.emailNotificationKey === 'string' &&
+    EMAIL_NOTIFICATION_KEYS.includes(data.emailNotificationKey)
+  ) {
+    return data.emailNotificationKey;
+  }
+  if (
+    typeof data.notificationSetting === 'string' &&
+    EMAIL_NOTIFICATION_KEYS.includes(data.notificationSetting)
+  ) {
+    return data.notificationSetting;
+  }
+
+  if (data.recipientType === 'admin') {
+    return null;
+  }
+
+  if (templateName === 'otp' || templateName === 'monthly-summary') {
+    return null;
+  }
+
+  if (templateName === 'revenue-credit') {
+    return 'email_on_revenue_credit';
+  }
+
+  if (templateName === 'capital-transaction') {
+    const typeText =
+      `${data.transactionType || ''} ${data.message || ''} ${data.status || ''}`.toLowerCase();
+    if (typeText.includes('withdraw')) {
+      return 'email_on_capital_withdrawal';
+    }
+    return 'email_on_capital_deposit';
+  }
+
+  if (templateName === 'withdrawal') {
+    const account = String(
+      data.accountType || data.account_type || data.account || ''
+    ).toLowerCase();
+    if (account.includes('revenue')) {
+      return 'email_on_revenue_withdrawal';
+    }
+    return 'email_on_capital_withdrawal';
+  }
+
+  if (templateName === 'support') {
+    const event = String(data.eventLabel || data.event || '').toLowerCase();
+    if (event.includes('created') || event.includes('raised')) {
+      return 'email_on_support_ticket';
+    }
+    if (event.includes('resolved') || event.includes('closed')) {
+      return 'email_on_support_closed';
+    }
+    return 'email_on_support_reply';
+  }
+
+  const haystack = [
+    data.subjectTitle,
+    data.actionLabel,
+    data.message,
+    data.body,
+    data.subject,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (templateName === 'approval' || templateName === 'rejection') {
+    if (
+      haystack.includes('pause') ||
+      haystack.includes('resumed') ||
+      haystack.includes('resume')
+    ) {
+      return 'email_on_account_pause';
+    }
+    if (
+      haystack.includes('kyc') ||
+      haystack.includes('pan') ||
+      haystack.includes('aadhar') ||
+      haystack.includes('aadhaar')
+    ) {
+      return 'email_on_kyc_update';
+    }
+    if (
+      haystack.includes('profile') ||
+      haystack.includes('email change') ||
+      haystack.includes('mobile change')
+    ) {
+      return 'email_on_profile_update';
+    }
+    return templateName === 'approval'
+      ? 'email_on_approval'
+      : 'email_on_rejection';
+  }
+
+  if (templateName === 'custom-notification') {
+    if (haystack.includes('registration')) {
+      return 'email_on_registration';
+    }
+    if (
+      haystack.includes('pause') ||
+      haystack.includes('resumed') ||
+      haystack.includes('resume')
+    ) {
+      return 'email_on_account_pause';
+    }
+    if (
+      haystack.includes('kyc') ||
+      haystack.includes('pan') ||
+      haystack.includes('aadhar') ||
+      haystack.includes('aadhaar')
+    ) {
+      return 'email_on_kyc_update';
+    }
+    if (
+      haystack.includes('profile') ||
+      haystack.includes('email change') ||
+      haystack.includes('mobile change')
+    ) {
+      return 'email_on_profile_update';
+    }
+    return 'email_on_approval';
+  }
+
+  return null;
+}
+
+/**
+ * @param {string} templateName
+ * @param {Record<string, unknown>} data
+ * @returns {Promise<boolean>}
+ */
+async function isEmailNotificationAllowed(templateName, data = {}) {
+  const key = resolveEmailNotificationSettingKey(templateName, data);
+  if (!key) {
+    return true;
+  }
+
+  try {
+    const settings = await getEmailNotificationSettingsCached();
+    return settings[key] !== false;
+  } catch (error) {
+    logger.warn(
+      `Email notification settings lookup failed; allowing send: ${error.message}`,
+      { templateName, key }
+    );
+    return true;
+  }
+}
+
+/**
  * Queue and send an email via Resend.
  * OTP / approval / rejection wait for first attempt; others are non-blocking.
  * Retries are handled by the email retry cron (every 5 minutes).
@@ -643,6 +896,25 @@ export async function sendEmail(to, templateName, data = {}) {
       success: true,
       message: 'Email skipped for backdate source',
       data: { emailLogId: null, subject: null, skipped: true },
+    };
+  }
+
+  if (!(await isEmailNotificationAllowed(templateName, data))) {
+    const settingKey = resolveEmailNotificationSettingKey(templateName, data);
+    logger.info('Skipping email — notification setting disabled', {
+      to,
+      templateName,
+      settingKey,
+    });
+    return {
+      success: true,
+      message: 'Email skipped — notification disabled',
+      data: {
+        emailLogId: null,
+        subject: null,
+        skipped: true,
+        settingKey,
+      },
     };
   }
 

@@ -14,7 +14,12 @@ import {
   getCreditSettings,
   updateCreditSettings,
 } from '../models/revenue.model.js';
-import { attemptEmailDelivery } from '../services/email.service.js';
+import {
+  attemptEmailDelivery,
+  invalidateEmailNotificationSettingsCache,
+  EMAIL_NOTIFICATION_DEFAULTS,
+  EMAIL_NOTIFICATION_KEYS,
+} from '../services/email.service.js';
 import {
   performBackup,
   getBackupDirectory,
@@ -1369,5 +1374,131 @@ export async function triggerManualBackup(req, res) {
       message: 'Backup failed',
       error: 'BACKUP_FAILED',
     });
+  }
+}
+
+/**
+ * Parse a boolean-like setting value.
+ * @param {unknown} value
+ * @param {boolean} fallback
+ * @returns {boolean}
+ */
+function parseBoolSetting(value, fallback = true) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (value == null || value === '') {
+    return fallback;
+  }
+  const s = String(value).trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'on' || s === 'yes') {
+    return true;
+  }
+  if (s === 'false' || s === '0' || s === 'off' || s === 'no') {
+    return false;
+  }
+  return fallback;
+}
+
+/**
+ * Ensure all email notification keys exist in global_settings.
+ * @param {string | null} adminId
+ * @returns {Promise<Record<string, boolean>>}
+ */
+async function ensureEmailNotificationSettings(adminId = null) {
+  const current = await getCachedSettings();
+  /** @type {Record<string, boolean>} */
+  const map = {};
+
+  for (const key of EMAIL_NOTIFICATION_KEYS) {
+    const defaultValue = EMAIL_NOTIFICATION_DEFAULTS[key] !== false;
+    if (current[key] === undefined || current[key] === null) {
+      await upsertSetting(key, defaultValue ? 'true' : 'false', adminId);
+      map[key] = defaultValue;
+    } else {
+      map[key] = parseBoolSetting(current[key], defaultValue);
+    }
+  }
+
+  if (Object.keys(map).some((k) => current[k] === undefined)) {
+    await refreshSettingsCache();
+  }
+
+  return map;
+}
+
+/**
+ * GET /api/v1/admin/settings/email-notifications
+ */
+export async function getEmailNotificationSettings(req, res) {
+  try {
+    const settings = await ensureEmailNotificationSettings(
+      req.user?.userId || null
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Email notification settings retrieved',
+      data: { settings },
+    });
+  } catch (error) {
+    return handleError(res, error, 'getEmailNotificationSettings');
+  }
+}
+
+/**
+ * PATCH /api/v1/admin/settings/email-notifications (Super Admin)
+ * Body: { settings: { email_on_*: boolean } } or flat key map
+ */
+export async function patchEmailNotificationSettings(req, res) {
+  try {
+    const body = req.body || {};
+    const incoming =
+      body.settings && typeof body.settings === 'object'
+        ? body.settings
+        : body;
+
+    const before = await ensureEmailNotificationSettings(req.user.userId);
+    /** @type {Record<string, boolean>} */
+    const updates = {};
+
+    for (const key of EMAIL_NOTIFICATION_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(incoming, key)) {
+        updates[key] = parseBoolSetting(incoming[key], before[key]);
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid email notification settings provided',
+        error: 'VALIDATION_ERROR',
+      });
+    }
+
+    for (const [key, value] of Object.entries(updates)) {
+      await upsertSetting(key, value ? 'true' : 'false', req.user.userId);
+    }
+
+    await refreshSettingsCache();
+    invalidateEmailNotificationSettingsCache();
+
+    const after = await ensureEmailNotificationSettings(req.user.userId);
+
+    await audit(
+      req,
+      buildActionDescription('Updated', 'email notification settings'),
+      null,
+      before,
+      after
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Email notification settings updated',
+      data: { settings: after },
+    });
+  } catch (error) {
+    return handleError(res, error, 'patchEmailNotificationSettings');
   }
 }
