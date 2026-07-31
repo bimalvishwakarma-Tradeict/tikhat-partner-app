@@ -333,6 +333,7 @@ export const isRevenuePaused = async (investorId) => {
 /**
  * Capital balance after all approved movements with effective_date < date
  * (changes on day X apply from day X+1).
+ * Used by daily cron / regular revenue — do not change this semantics.
  * @param {string} investorId
  * @param {string} dateStr - YYYY-MM-DD (IST)
  * @returns {Promise<number>}
@@ -358,6 +359,191 @@ export const getCapitalBalanceAsOf = async (investorId, dateStr) => {
   );
 
   return Math.max(0, Math.round(Number(result.rows[0].balance) || 0));
+};
+
+/**
+ * Capital balance on a specific date for backdate calculations.
+ * Includes all approved deposits/withdrawals with transfer_date <= date.
+ * (Falls back to payment_date / created_at when transfer_date is null.)
+ *
+ * @param {string} investorId
+ * @param {Date | string} date
+ * @param {{ client?: import('pg').PoolClient }} [options]
+ * @returns {Promise<number>}
+ */
+export const getCapitalBalanceOnDate = async (
+  investorId,
+  date,
+  options = {}
+) => {
+  const dateStr =
+    typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : getISTDateParts(date).dateStr;
+  const executor = options.client || pool;
+
+  const result = await executor.query(
+    `
+    SELECT
+      COALESCE(SUM(
+        CASE
+          WHEN type IN ('deposit', 'admin_credit') THEN amount
+          WHEN type IN ('withdrawal', 'admin_debit') THEN -amount
+          ELSE 0
+        END
+      ), 0)::INTEGER AS balance
+    FROM capital_transactions
+    WHERE investor_id = $1
+      AND is_deleted = FALSE
+      AND status IN ('approved', 'completed')
+      AND COALESCE(
+            transfer_date,
+            payment_date,
+            (created_at AT TIME ZONE 'Asia/Kolkata')::date
+          ) <= $2::date
+  `,
+    [investorId, dateStr]
+  );
+
+  return Math.max(0, Math.round(Number(result.rows[0].balance) || 0));
+};
+
+/**
+ * Enumerate inclusive YYYY-MM-DD dates (IST calendar arithmetic).
+ * @param {string} start
+ * @param {string} end
+ * @returns {string[]}
+ */
+const enumerateDatesInclusive = (start, end) => {
+  const dates = [];
+  let cursor = start;
+  while (cursor <= end) {
+    dates.push(cursor);
+    const { year, month, day } = getISTDateParts(`${cursor}T00:00:00+05:30`);
+    const next = new Date(Date.UTC(year, month - 1, day + 1));
+    const y = next.getUTCFullYear();
+    const m = String(next.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(next.getUTCDate()).padStart(2, '0');
+    cursor = `${y}-${m}-${d}`;
+  }
+  return dates;
+};
+
+/**
+ * Backdate daily amounts — capital balance looked up per day via transfer_date.
+ * Non-last days: 90–110% of that day's daily average.
+ * Last calendar day of each month (when in range): remaining of month expected.
+ * Capital 0 on a day → amount 0.
+ *
+ * @param {string | null} investorId
+ * @param {string} startDate - YYYY-MM-DD
+ * @param {string} endDate - YYYY-MM-DD
+ * @param {number | null} [roiPercentage] - fixed ROI; null = active ROI per day
+ * @param {{
+ *   client?: import('pg').PoolClient,
+ *   capitalBoost?: number,
+ *   boostFromDate?: string | null,
+ *   fixedCapital?: number | null,
+ * }} [options]
+ * @returns {Promise<Array<{ date: string, amount: number, capitalUsed: number, roi_percentage: number }>>}
+ */
+export const calculateBackdateDailyAmounts = async (
+  investorId,
+  startDate,
+  endDate,
+  roiPercentage = null,
+  options = {}
+) => {
+  const dates = enumerateDatesInclusive(startDate, endDate);
+  if (dates.length === 0) {
+    return [];
+  }
+
+  const boost = Math.round(Number(options.capitalBoost) || 0);
+  const boostFromDate = options.boostFromDate || null;
+  const fixedCapital =
+    options.fixedCapital != null ? Math.round(Number(options.fixedCapital)) : null;
+  const clientOpts = options.client ? { client: options.client } : {};
+
+  /** @type {Map<string, string[]>} */
+  const byMonth = new Map();
+  for (const dateStr of dates) {
+    const key = dateStr.slice(0, 7);
+    if (!byMonth.has(key)) {
+      byMonth.set(key, []);
+    }
+    byMonth.get(key).push(dateStr);
+  }
+
+  /** @type {Array<{ date: string, amount: number, capitalUsed: number, roi_percentage: number }>} */
+  const results = [];
+
+  for (const monthDates of byMonth.values()) {
+    /** @type {Array<{ date: string, capital: number, roi: number, dailyAvg: number }>} */
+    const meta = [];
+
+    for (const dateStr of monthDates) {
+      let capital;
+      if (fixedCapital != null) {
+        capital = fixedCapital;
+      } else if (investorId) {
+        capital = await getCapitalBalanceOnDate(investorId, dateStr, clientOpts);
+        if (boostFromDate && dateStr >= boostFromDate && boost > 0) {
+          capital = Math.round(capital + boost);
+        }
+      } else {
+        capital = 0;
+      }
+
+      let roi;
+      if (roiPercentage != null && Number.isFinite(Number(roiPercentage))) {
+        roi = Number.parseFloat(Number(roiPercentage).toFixed(2));
+      } else if (investorId) {
+        roi = await getActiveROI(investorId, dateStr);
+      } else {
+        roi = 0;
+      }
+
+      const { year, month } = getISTDateParts(`${dateStr}T00:00:00+05:30`);
+      const daysInMonth = getDaysInMonth(year, month);
+      const dailyAvg =
+        capital <= 0 || !Number.isFinite(roi) || roi <= 0
+          ? 0
+          : calculateDailyAverage(capital, roi, daysInMonth);
+
+      meta.push({ date: dateStr, capital, roi, dailyAvg });
+    }
+
+    const monthExpected = Math.round(
+      meta.reduce((sum, row) => sum + row.dailyAvg, 0)
+    );
+    let creditedSoFar = 0;
+
+    for (const row of meta) {
+      let amount = 0;
+
+      if (row.capital <= 0 || row.roi <= 0 || row.dailyAvg <= 0) {
+        amount = 0;
+      } else if (isLastDayOfMonth(`${row.date}T00:00:00+05:30`)) {
+        amount = Math.max(0, monthExpected - creditedSoFar);
+      } else {
+        const { min, max } = getDailyRange(row.dailyAvg);
+        amount = randomIntInclusive(min, max);
+      }
+
+      amount = Math.round(amount);
+      creditedSoFar += amount;
+
+      results.push({
+        date: row.date,
+        amount,
+        capitalUsed: Math.round(row.capital),
+        roi_percentage: Number.parseFloat(Number(row.roi || 0).toFixed(2)),
+      });
+    }
+  }
+
+  return results;
 };
 
 /**

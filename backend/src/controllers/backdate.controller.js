@@ -31,12 +31,11 @@ import {
   getISTDateParts,
   getDaysInMonth,
   getActiveROI,
-  getCapitalBalanceAsOf,
+  getCapitalBalanceOnDate,
   calculateDailyAverage,
   getDailyRange,
-  calculateDailyAmounts,
+  calculateBackdateDailyAmounts,
   isLastDayOfMonth,
-  getMonthlyExpected,
   getCreditedTotalInMonth,
   updateMonthlyTracking,
 } from '../services/roi.service.js';
@@ -294,14 +293,16 @@ async function notifySubmittingAdmin(request, title, body) {
 
 /**
  * Resolve a single-day credit amount (does not skip paused investors).
+ * Uses capital balance on that date (transfer_date <= date).
  * @param {string} investorId
  * @param {string} dateStr
- * @param {{ amount?: number|null, roiPercentage?: number|null }} options
+ * @param {{ amount?: number|null, roiPercentage?: number|null, client?: import('pg').PoolClient }} options
  * @returns {Promise<{ amount: number, roi: number, capital: number }>}
  */
 async function resolveSingleDayAmount(investorId, dateStr, options = {}) {
+  const clientOpts = options.client ? { client: options.client } : {};
   const capital = Math.round(
-    await getCapitalBalanceAsOf(investorId, dateStr)
+    await getCapitalBalanceOnDate(investorId, dateStr, clientOpts)
   );
   const resolvedRoi =
     options.roiPercentage != null
@@ -332,7 +333,25 @@ async function resolveSingleDayAmount(investorId, dateStr, options = {}) {
   const daysInMonth = getDaysInMonth(year, month);
 
   if (isLastDayOfMonth(`${dateStr}T00:00:00+05:30`)) {
-    const expectedTotal = await getMonthlyExpected(investorId, year, month);
+    // Month expected = sum of per-day averages using capital on each day
+    let expectedTotal = 0;
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const d = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayCapital = await getCapitalBalanceOnDate(
+        investorId,
+        d,
+        clientOpts
+      );
+      const dayRoi =
+        options.roiPercentage != null
+          ? resolvedRoi
+          : parseRoiPercent(await getActiveROI(investorId, d));
+      if (dayCapital > 0 && dayRoi > 0) {
+        expectedTotal += calculateDailyAverage(dayCapital, dayRoi, daysInMonth);
+      }
+    }
+    expectedTotal = Math.round(expectedTotal);
+
     const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
     const creditedSoFar = await getCreditedTotalInMonth(
       investorId,
@@ -367,7 +386,7 @@ async function resolveSingleDayAmount(investorId, dateStr, options = {}) {
 }
 
 /**
- * Build bulk distribution preview using 90–110% algorithm (month-grouped).
+ * Build bulk distribution preview using capital-aware per-day amounts.
  * @param {string} investorId
  * @param {string} startDate
  * @param {string} endDate
@@ -380,76 +399,30 @@ export async function buildBulkRevenueDistribution(
   endDate,
   roiOverride = null
 ) {
-  const dates = enumerateDatesInclusive(startDate, endDate);
-  if (dates.length === 0) {
+  const rows = await calculateBackdateDailyAmounts(
+    investorId,
+    startDate,
+    endDate,
+    roiOverride
+  );
+
+  if (rows.length === 0) {
     const error = new Error('Date range produced no days');
     error.code = 'VALIDATION_ERROR';
     error.status = 400;
     throw error;
   }
 
-  /** @type {Map<string, string[]>} */
-  const byMonth = new Map();
-  for (const dateStr of dates) {
-    const { year, month } = getISTDateParts(`${dateStr}T00:00:00+05:30`);
-    const key = `${year}-${String(month).padStart(2, '0')}`;
-    if (!byMonth.has(key)) {
-      byMonth.set(key, []);
-    }
-    byMonth.get(key).push(dateStr);
-  }
+  const distribution = rows.map((row) => ({
+    date: row.date,
+    amount: Math.round(row.amount),
+    roi_percentage: parseRoiPercent(row.roi_percentage),
+    capital_at_time: Math.round(row.capitalUsed),
+  }));
 
-  /** @type {object[]} */
-  const distribution = [];
-  let expectedTotal = 0;
-
-  for (const monthDates of byMonth.values()) {
-    /** @type {{ date: string, capital: number, roi: number, dailyAvg: number }[]} */
-    const meta = [];
-
-    for (const dateStr of monthDates) {
-      const capital = Math.round(
-        await getCapitalBalanceAsOf(investorId, dateStr)
-      );
-      const roi =
-        roiOverride != null
-          ? parseRoiPercent(roiOverride)
-          : parseRoiPercent(await getActiveROI(investorId, dateStr));
-
-      if (capital <= 0 || roi <= 0) {
-        meta.push({ date: dateStr, capital, roi, dailyAvg: 0 });
-        continue;
-      }
-
-      const { year, month } = getISTDateParts(`${dateStr}T00:00:00+05:30`);
-      const daysInMonth = getDaysInMonth(year, month);
-      const dailyAvg = calculateDailyAverage(capital, roi, daysInMonth);
-      meta.push({ date: dateStr, capital, roi, dailyAvg });
-    }
-
-    const monthSubtotal = Math.round(
-      meta.reduce((sum, row) => sum + row.dailyAvg, 0)
-    );
-    const amounts = calculateDailyAmounts(
-      monthSubtotal,
-      meta.length,
-      0,
-      meta.length
-    );
-
-    for (let i = 0; i < meta.length; i += 1) {
-      const amount = Math.round(amounts[i] || 0);
-      distribution.push({
-        date: meta[i].date,
-        amount,
-        roi_percentage: parseRoiPercent(meta[i].roi),
-        capital_at_time: meta[i].capital,
-      });
-      expectedTotal += amount;
-    }
-  }
-
-  expectedTotal = Math.round(expectedTotal);
+  const expectedTotal = Math.round(
+    distribution.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+  );
 
   if (expectedTotal <= 0) {
     const error = new Error(
@@ -478,6 +451,7 @@ function getTodayIST() {
 /**
  * Estimate / build revenue distribution for a period with optional capital boost
  * or fixed capital (new investor). Inclusive of startDate..endDate.
+ * Uses capital-aware per-day amounts (transfer_date <= day).
  *
  * @param {object} options
  * @param {string | null} options.investorId
@@ -487,6 +461,7 @@ function getTodayIST() {
  * @param {number} [options.capitalBoost=0]
  * @param {string | null} [options.boostFromDate]
  * @param {number | null} [options.fixedCapital]
+ * @param {import('pg').PoolClient} [options.client]
  * @returns {Promise<{ expected_total: number, distribution: object[], day_count: number }>}
  */
 export async function buildPeriodRevenueEstimate({
@@ -497,96 +472,39 @@ export async function buildPeriodRevenueEstimate({
   capitalBoost = 0,
   boostFromDate = null,
   fixedCapital = null,
+  client = null,
 }) {
-  const dates = enumerateDatesInclusive(startDate, endDate);
-  if (dates.length === 0) {
+  const rows = await calculateBackdateDailyAmounts(
+    investorId,
+    startDate,
+    endDate,
+    roiOverride,
+    {
+      client: client || undefined,
+      capitalBoost,
+      boostFromDate,
+      fixedCapital,
+    }
+  );
+
+  if (rows.length === 0) {
     const error = new Error('Date range produced no days');
     error.code = 'VALIDATION_ERROR';
     error.status = 400;
     throw error;
   }
 
-  /** @type {Map<string, string[]>} */
-  const byMonth = new Map();
-  for (const dateStr of dates) {
-    const { year, month } = getISTDateParts(`${dateStr}T00:00:00+05:30`);
-    const key = `${year}-${String(month).padStart(2, '0')}`;
-    if (!byMonth.has(key)) {
-      byMonth.set(key, []);
-    }
-    byMonth.get(key).push(dateStr);
-  }
-
-  /** @type {object[]} */
-  const distribution = [];
-  let expectedTotal = 0;
-  const boost = Math.round(Number(capitalBoost) || 0);
-
-  for (const monthDates of byMonth.values()) {
-    /** @type {{ date: string, capital: number, roi: number, dailyAvg: number }[]} */
-    const meta = [];
-
-    for (const dateStr of monthDates) {
-      let capital;
-      if (fixedCapital != null) {
-        capital = Math.round(Number(fixedCapital));
-      } else {
-        capital = Math.round(
-          await getCapitalBalanceAsOf(investorId, dateStr)
-        );
-        if (
-          boostFromDate &&
-          dateStr >= boostFromDate &&
-          boost > 0
-        ) {
-          capital += boost;
-        }
-      }
-
-      let roi;
-      if (roiOverride != null) {
-        roi = parseRoiPercent(roiOverride);
-      } else if (investorId) {
-        roi = parseRoiPercent(await getActiveROI(investorId, dateStr));
-      } else {
-        roi = 0;
-      }
-
-      if (capital <= 0 || roi <= 0) {
-        meta.push({ date: dateStr, capital, roi, dailyAvg: 0 });
-        continue;
-      }
-
-      const { year, month } = getISTDateParts(`${dateStr}T00:00:00+05:30`);
-      const daysInMonth = getDaysInMonth(year, month);
-      const dailyAvg = calculateDailyAverage(capital, roi, daysInMonth);
-      meta.push({ date: dateStr, capital, roi, dailyAvg });
-    }
-
-    const monthSubtotal = Math.round(
-      meta.reduce((sum, row) => sum + row.dailyAvg, 0)
-    );
-    const amounts = calculateDailyAmounts(
-      monthSubtotal,
-      meta.length,
-      0,
-      meta.length
-    );
-
-    for (let i = 0; i < meta.length; i += 1) {
-      const amount = Math.round(amounts[i] || 0);
-      distribution.push({
-        date: meta[i].date,
-        amount,
-        roi_percentage: parseRoiPercent(meta[i].roi),
-        capital_at_time: meta[i].capital,
-      });
-      expectedTotal += amount;
-    }
-  }
+  const distribution = rows.map((row) => ({
+    date: row.date,
+    amount: Math.round(row.amount),
+    roi_percentage: parseRoiPercent(row.roi_percentage),
+    capital_at_time: Math.round(row.capitalUsed),
+  }));
 
   return {
-    expected_total: Math.round(expectedTotal),
+    expected_total: Math.round(
+      distribution.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+    ),
     distribution,
     day_count: distribution.length,
   };
@@ -1181,6 +1099,104 @@ export async function submitNewInvestorBackdate(req, res) {
 }
 
 /**
+ * Soft-delete revenue credits from a date onwards and resync monthly tracking
+ * for affected months so subsequent inserts can update credited totals correctly.
+ * @param {import('pg').PoolClient} client
+ * @param {string} investorId
+ * @param {string} fromDateStr
+ * @returns {Promise<number>} deleted row count
+ */
+async function softDeleteRevenueCreditsFromDate(client, investorId, fromDateStr) {
+  const deleted = await client.query(
+    `UPDATE revenue_credits
+     SET is_deleted = TRUE,
+         updated_at = NOW()
+     WHERE investor_id = $1
+       AND is_deleted = FALSE
+       AND credit_date >= $2::date
+     RETURNING id, credit_date`,
+    [investorId, fromDateStr]
+  );
+
+  const { year: fromYear, month: fromMonth } = getISTDateParts(
+    `${fromDateStr}T00:00:00+05:30`
+  );
+  const today = getISTDateParts(new Date());
+
+  let y = fromYear;
+  let m = fromMonth;
+  while (y < today.year || (y === today.year && m <= today.month)) {
+    const daysInMonth = getDaysInMonth(y, m);
+    const monthStart = `${y}-${String(m).padStart(2, '0')}-01`;
+    const monthEnd = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+    const agg = await client.query(
+      `SELECT
+         COALESCE(SUM(
+           CASE
+             WHEN credit_type = 'manual_debit' THEN -amount
+             ELSE amount
+           END
+         ), 0)::INTEGER AS total,
+         COUNT(*) FILTER (
+           WHERE credit_type IS DISTINCT FROM 'manual_debit'
+         )::INTEGER AS days_credited
+       FROM revenue_credits
+       WHERE investor_id = $1
+         AND is_deleted = FALSE
+         AND is_reversed = FALSE
+         AND credit_date >= $2::date
+         AND credit_date <= $3::date`,
+      [investorId, monthStart, monthEnd]
+    );
+
+    const creditedTotal = Math.round(Number(agg.rows[0]?.total) || 0);
+    const daysCredited = Math.round(Number(agg.rows[0]?.days_credited) || 0);
+    const daysRemaining = Math.max(0, daysInMonth - daysCredited);
+    const status = daysCredited >= daysInMonth ? 'completed' : 'in_progress';
+
+    await client.query(
+      `INSERT INTO monthly_revenue_tracking (
+         investor_id,
+         year,
+         month,
+         expected_total,
+         credited_total,
+         days_credited,
+         days_paused,
+         days_remaining,
+         status
+       ) VALUES ($1, $2, $3, GREATEST($4, 0), $5, $6, 0, $7, $8)
+       ON CONFLICT (investor_id, year, month)
+       DO UPDATE SET
+         credited_total = EXCLUDED.credited_total,
+         days_credited = EXCLUDED.days_credited,
+         days_remaining = EXCLUDED.days_remaining,
+         status = EXCLUDED.status,
+         updated_at = NOW()`,
+      [
+        investorId,
+        y,
+        m,
+        creditedTotal,
+        creditedTotal,
+        daysCredited,
+        daysRemaining,
+        status,
+      ]
+    );
+
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+
+  return deleted.rowCount || 0;
+}
+
+/**
  * Execute capital backdate request.
  * @param {object} request
  * @param {string} approverId
@@ -1218,14 +1234,37 @@ async function executeCapitalBackdate(request, approverId) {
 
     /** @type {object[]} */
     let credits = [];
+    let deletedCount = 0;
     if (autoCalculate) {
-      const distribution = Array.isArray(details.revenue_preview?.distribution)
-        ? details.revenue_preview.distribution
-        : [];
+      // Remove existing credits from capital date onward, then regenerate
+      // with capital-aware per-day balances (includes this new deposit).
+      deletedCount = await softDeleteRevenueCreditsFromDate(
+        client,
+        investor.id,
+        dateStr
+      );
 
-      if (distribution.length === 0) {
+      const today = getTodayIST();
+      const regenerated = await calculateBackdateDailyAmounts(
+        investor.id,
+        dateStr,
+        today,
+        null,
+        { client }
+      );
+
+      const distribution = regenerated.map((row) => ({
+        date: row.date,
+        amount: Math.round(row.amount),
+        roi_percentage: parseRoiPercent(row.roi_percentage),
+        capital_at_time: Math.round(row.capitalUsed),
+      }));
+
+      if (distribution.every((d) => Math.round(Number(d.amount) || 0) <= 0)) {
         throw Object.assign(
-          new Error('Revenue distribution missing from capital backdate request'),
+          new Error(
+            'Revenue recalculation produced no positive amounts — check capital and ROI'
+          ),
           { code: 'VALIDATION_ERROR', status: 400 }
         );
       }
@@ -1234,7 +1273,7 @@ async function executeCapitalBackdate(request, approverId) {
         client,
         investor.id,
         distribution,
-        { skipExisting: true }
+        { skipExisting: false }
       );
     }
 
@@ -1250,6 +1289,7 @@ async function executeCapitalBackdate(request, approverId) {
         created_at: capitalTxn.created_at,
       },
       auto_calculate_revenue: autoCalculate,
+      deleted_credit_count: deletedCount,
       credit_count: credits.length,
       total_amount: Math.round(
         credits.reduce((sum, c) => sum + Number(c.amount), 0)
@@ -1909,6 +1949,7 @@ async function insertBackdateCredit(client, params) {
 /**
  * Execute a pending single/bulk revenue backdate request.
  * Silent — never emails or notifies the investor.
+ * Recalculates amounts at approval using capital balance on each date.
  * @param {object} request
  * @param {string} approverId
  * @returns {Promise<object>}
@@ -1935,13 +1976,30 @@ async function executeRevenueBackdate(request, approverId) {
 
     if (request.type === 'single_revenue') {
       const dateStr = details.date || request.start_date;
-      const amount = Math.round(Number(details.resolved_amount));
-      const roi = parseRoiPercent(
-        details.resolved_roi ?? details.roi_percentage ?? 0
-      );
-      const capital = Math.round(Number(details.capital_at_time ?? 0));
+      if (!dateStr) {
+        throw Object.assign(new Error('Invalid single backdate details'), {
+          code: 'VALIDATION_ERROR',
+          status: 400,
+        });
+      }
 
-      if (!dateStr || amount <= 0) {
+      const manualAmount =
+        details.amount != null && details.amount !== ''
+          ? Math.round(Number(details.amount))
+          : null;
+
+      const resolved = await resolveSingleDayAmount(investor.id, dateStr, {
+        amount: manualAmount,
+        roiPercentage:
+          details.roi_percentage != null
+            ? parseRoiPercent(details.roi_percentage)
+            : request.roi_percentage != null
+              ? parseRoiPercent(request.roi_percentage)
+              : null,
+        client,
+      });
+
+      if (resolved.amount <= 0) {
         throw Object.assign(new Error('Invalid single backdate details'), {
           code: 'VALIDATION_ERROR',
           status: 400,
@@ -1951,21 +2009,42 @@ async function executeRevenueBackdate(request, approverId) {
       const credit = await insertBackdateCredit(client, {
         investorId: investor.id,
         dateStr,
-        amount,
-        roiPercentage: roi,
-        capitalAtTime: capital,
+        amount: resolved.amount,
+        roiPercentage: resolved.roi,
+        capitalAtTime: resolved.capital,
       });
       createdCredits.push(credit);
     } else if (request.type === 'bulk_revenue') {
-      const distribution = Array.isArray(details.distribution)
-        ? details.distribution
-        : [];
-      if (distribution.length === 0) {
-        throw Object.assign(new Error('Bulk distribution missing'), {
+      const startDate = request.start_date || details.start_date;
+      const endDate = request.end_date || details.end_date;
+      if (!startDate || !endDate) {
+        throw Object.assign(new Error('Bulk date range missing'), {
           code: 'VALIDATION_ERROR',
           status: 400,
         });
       }
+
+      const roiOverride =
+        request.roi_percentage != null
+          ? parseRoiPercent(request.roi_percentage)
+          : details.roi_percentage != null
+            ? parseRoiPercent(details.roi_percentage)
+            : null;
+
+      const regenerated = await calculateBackdateDailyAmounts(
+        investor.id,
+        startDate,
+        endDate,
+        roiOverride,
+        { client }
+      );
+
+      const distribution = regenerated.map((row) => ({
+        date: row.date,
+        amount: Math.round(row.amount),
+        roi_percentage: parseRoiPercent(row.roi_percentage),
+        capital_at_time: Math.round(row.capitalUsed),
+      }));
 
       for (const row of distribution) {
         const amount = Math.round(Number(row.amount) || 0);
