@@ -309,7 +309,6 @@ export type InvestorDashboard = {
   total_balance_formatted: string;
   pending_withdrawal: number;
   pending_withdrawal_formatted: string;
-  effective_roi: number | null;
   joining_date: string | null;
   partner_since: string | null;
   last_5_capital_transactions: CapitalTransaction[];

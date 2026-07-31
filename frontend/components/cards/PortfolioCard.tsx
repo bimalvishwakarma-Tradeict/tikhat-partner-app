@@ -6,23 +6,20 @@ import { Card } from '../ui/Card';
 export type PortfolioCardProps = {
   totalInvested: number;
   totalEarned: number;
-  effectiveRoi: number | null | undefined;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 };
 
+/**
+ * Portfolio summary — invested and earned amounts only (no ROI %).
+ */
 export function PortfolioCard({
   totalInvested = 0,
   totalEarned = 0,
-  effectiveRoi,
   style,
   testID,
 }: PortfolioCardProps) {
-  const { colors, typography, spacing, borderRadius } = useTheme();
-  const roi =
-    effectiveRoi === null || effectiveRoi === undefined
-      ? '—'
-      : `${Number(effectiveRoi).toFixed(2)}%`;
+  const { colors, typography, spacing } = useTheme();
 
   return (
     <Card accent style={style} testID={testID}>
@@ -73,30 +70,6 @@ export function PortfolioCard({
           </Text>
         </View>
       </View>
-
-      <View
-        style={[
-          styles.roiBox,
-          {
-            backgroundColor: colors?.surface,
-            borderRadius: borderRadius?.md,
-            marginTop: spacing?.md,
-            padding: spacing?.md,
-          },
-        ]}
-      >
-        <Text style={[typography?.caption, { color: colors?.text?.secondary }]}>
-          Effective ROI
-        </Text>
-        <Text
-          style={[
-            typography?.amount,
-            { color: colors?.secondary, marginTop: spacing?.xs },
-          ]}
-        >
-          {roi}
-        </Text>
-      </View>
     </Card>
   );
 }
@@ -107,8 +80,5 @@ const styles = StyleSheet.create({
   },
   cell: {
     flex: 1,
-  },
-  roiBox: {
-    alignItems: 'flex-start',
   },
 });

@@ -71,10 +71,6 @@ export default function PartnerDashboardScreen() {
         pending_withdrawal: Math.round(Number(result?.pending_withdrawal) || 0),
         pending_withdrawal_formatted:
           result?.pending_withdrawal_formatted || '₹0',
-        effective_roi:
-          result?.effective_roi === null || result?.effective_roi === undefined
-            ? null
-            : Number(result.effective_roi),
         joining_date: result?.joining_date ?? null,
         partner_since: result?.partner_since ?? null,
         last_5_capital_transactions: Array.isArray(
@@ -283,7 +279,6 @@ export default function PartnerDashboardScreen() {
           <PortfolioCard
             totalInvested={data?.capital_balance ?? 0}
             totalEarned={totalEarned ?? 0}
-            effectiveRoi={data?.effective_roi}
           />
 
           <Text

@@ -362,7 +362,6 @@ export async function getInvestorDashboard(req, res) {
         pending_withdrawal_formatted: formatCurrency(
           balances.pendingWithdrawal
         ),
-        effective_roi: balances.effectiveROI,
         joining_date: joiningDate,
         partner_since: joiningDate
           ? `Partner Since: ${joiningDate}`
