@@ -18,6 +18,8 @@ import {
   isEmailTaken,
   normalizeMobile,
 } from '../models/user.model.js';
+import { insertApprovedCapitalDeposit } from '../models/capital.model.js';
+import { insertRevenueCredit } from '../models/revenue.model.js';
 import {
   isValidEmail,
   isValidFullName,
@@ -621,7 +623,7 @@ function assertCapitalLimits(amount) {
 }
 
 /**
- * Insert approved capital deposit with backdated payment_date.
+ * Insert approved capital deposit with backdated transfer/payment/created dates.
  * @param {import('pg').PoolClient} client
  * @param {object} params
  */
@@ -641,38 +643,16 @@ async function insertBackdatedCapitalDeposit(client, params) {
     year,
   });
 
-  const result = await client.query(
-    `INSERT INTO capital_transactions (
-       transaction_id,
-       investor_id,
-       type,
-       amount,
-       original_requested_amount,
-       status,
-       utr_number,
-       remark,
-       admin_id,
-       admin_remark,
-       payment_date,
-       payment_utr
-     ) VALUES (
-       $1, $2, 'deposit', $3, $3, 'approved', $4, $5, $6, $7, $8::date, $4
-     )
-     RETURNING id, transaction_id, investor_id, type, amount, status,
-               utr_number, payment_date, remark, created_at`,
-    [
-      transactionId,
-      investorId,
-      Math.round(amount),
-      utrNumber || null,
-      remark || null,
-      adminId,
-      'Backdated capital entry approved',
-      dateStr,
-    ]
-  );
-
-  return result.rows[0];
+  return insertApprovedCapitalDeposit(client, {
+    investorId,
+    amount,
+    transactionDate: dateStr,
+    utrNumber,
+    remark,
+    adminId,
+    adminRemark: 'Backdated capital entry approved',
+    transactionId,
+  });
 }
 
 /**
@@ -1265,7 +1245,9 @@ async function executeCapitalBackdate(request, approverId) {
         id: capitalTxn.id,
         transaction_id: capitalTxn.transaction_id,
         amount: capitalTxn.amount,
-        payment_date: capitalTxn.payment_date,
+        transfer_date: capitalTxn.transfer_date || dateStr,
+        payment_date: capitalTxn.payment_date || dateStr,
+        created_at: capitalTxn.created_at,
       },
       auto_calculate_revenue: autoCalculate,
       credit_count: credits.length,
@@ -1440,7 +1422,9 @@ async function executeNewInvestorBackdate(request, approverId) {
         id: capitalTxn.id,
         transaction_id: capitalTxn.transaction_id,
         amount: capitalTxn.amount,
-        payment_date: capitalTxn.payment_date,
+        transfer_date: capitalTxn.transfer_date || joiningDate,
+        payment_date: capitalTxn.payment_date || joiningDate,
+        created_at: capitalTxn.created_at,
       },
       credit_count: credits.length,
       total_amount: Math.round(
@@ -1903,34 +1887,23 @@ async function insertBackdateCredit(client, params) {
   // Investor APIs map credit_type=backdate → "Revenue Credit" (never store
   // Backdate wording in remarks — none set here).
   const appliedRoi = parseRoiPercent(roiPercentage);
-  const insertResult = await client.query(
-    `INSERT INTO revenue_credits (
-       transaction_id,
-       investor_id,
-       credit_date,
-       amount,
-       credit_type,
-       roi_percentage_applied,
-       capital_at_time
-     ) VALUES ($1, $2, $3::date, $4, 'backdate', $5::NUMERIC(5,2), $6)
-     RETURNING id, transaction_id, investor_id, credit_date, amount,
-               credit_type, roi_percentage_applied, capital_at_time, created_at`,
-    [
-      transactionId,
-      investorId,
-      dateStr,
-      Math.round(amount),
-      Number.isFinite(appliedRoi) ? appliedRoi : null,
-      Math.round(capitalAtTime),
-    ]
-  );
+  const insertResult = await insertRevenueCredit(client, {
+    transactionId,
+    investorId,
+    creditDate: dateStr,
+    amount: Math.round(amount),
+    creditType: 'backdate',
+    roiPercentageApplied: Number.isFinite(appliedRoi) ? appliedRoi : null,
+    capitalAtTime:
+      capitalAtTime == null ? null : Math.round(Number(capitalAtTime)),
+  });
 
   await updateMonthlyTracking(investorId, year, month, Math.round(amount), {
     client,
     asOfDate: dateStr,
   });
 
-  return insertResult.rows[0];
+  return insertResult;
 }
 
 /**

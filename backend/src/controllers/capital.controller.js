@@ -331,7 +331,17 @@ export async function listTransactions(req, res) {
       message: 'Capital transactions retrieved',
       data: {
         ...result,
-        transactions: (result.transactions || []).map(toInvestorSafeCapitalTxn),
+        transactions: (result.transactions || []).map((row) => {
+          const safe = toInvestorSafeCapitalTxn(row);
+          const transactionDate =
+            safe.transfer_date || safe.payment_date || null;
+          const displayDate = transactionDate || safe.created_at;
+          return {
+            ...safe,
+            transaction_date: transactionDate,
+            date: displayDate ? formatDate(displayDate) : null,
+          };
+        }),
       },
     });
   } catch (error) {

@@ -184,7 +184,8 @@ export async function isUtrTaken(utrNumber) {
  * @param {object} params
  * @param {string} params.investorId
  * @param {number} params.amount
- * @param {string} params.transferDate - YYYY-MM-DD
+ * @param {string} [params.transferDate] - YYYY-MM-DD
+ * @param {string} [params.transactionDate] - alias for transferDate
  * @param {string} params.utrNumber
  * @param {string} params.paymentScreenshotUrl
  * @param {string | null} [params.remark]
@@ -194,6 +195,7 @@ export async function createDepositRequest({
   investorId,
   amount,
   transferDate,
+  transactionDate,
   utrNumber,
   paymentScreenshotUrl,
   remark = null,
@@ -202,6 +204,14 @@ export async function createDepositRequest({
 
   const wholeAmount = normalizeAmount(amount);
   const utr = normalizeUtr(utrNumber);
+  const dateValue = transferDate || transactionDate;
+  if (!dateValue) {
+    throw new CapitalError(
+      'transfer_date / transaction_date is required',
+      'VALIDATION_ERROR',
+      400
+    );
+  }
 
   const client = await pool.connect();
 
@@ -224,7 +234,7 @@ export async function createDepositRequest({
          payment_screenshot_url,
          transfer_date,
          remark
-       ) VALUES ($1, $2, 'deposit', $3, $3, 'submitted', $4, $5, $6, $7)
+       ) VALUES ($1, $2, 'deposit', $3, $3, 'submitted', $4, $5, $6::date, $7)
        RETURNING ${CAPITAL_COLUMNS}`,
       [
         transactionId,
@@ -232,7 +242,7 @@ export async function createDepositRequest({
         wholeAmount,
         utr,
         paymentScreenshotUrl,
-        transferDate,
+        dateValue,
         remark ? String(remark).trim() : null,
       ]
     );
@@ -254,6 +264,81 @@ export async function createDepositRequest({
   } finally {
     client.release();
   }
+}
+
+/**
+ * Insert an already-approved capital deposit with an explicit transaction date.
+ * Used by backdate approval — never defaults the business date to NOW().
+ *
+ * @param {import('pg').PoolClient} client
+ * @param {object} params
+ * @param {string} params.investorId
+ * @param {number} params.amount
+ * @param {string} params.transactionDate - YYYY-MM-DD (required backdate / transfer date)
+ * @param {string | null} [params.utrNumber]
+ * @param {string | null} [params.remark]
+ * @param {string} params.adminId
+ * @param {string} [params.adminRemark]
+ * @param {string} params.transactionId
+ * @returns {Promise<object>}
+ */
+export async function insertApprovedCapitalDeposit(client, {
+  investorId,
+  amount,
+  transactionDate,
+  utrNumber = null,
+  remark = null,
+  adminId,
+  adminRemark = 'Backdated capital entry approved',
+  transactionId,
+}) {
+  if (!transactionDate) {
+    throw new CapitalError(
+      'transactionDate is required',
+      'VALIDATION_ERROR',
+      400
+    );
+  }
+
+  const wholeAmount = normalizeAmount(amount);
+  const createdAtIso = `${String(transactionDate).slice(0, 10)}T00:00:00.000+05:30`;
+
+  const result = await client.query(
+    `INSERT INTO capital_transactions (
+       transaction_id,
+       investor_id,
+       type,
+       amount,
+       original_requested_amount,
+       status,
+       utr_number,
+       remark,
+       admin_id,
+       admin_remark,
+       transfer_date,
+       payment_date,
+       payment_utr,
+       created_at,
+       updated_at
+     ) VALUES (
+       $1, $2, 'deposit', $3, $3, 'approved', $4, $5, $6, $7,
+       $8::date, $8::date, $4, $9::timestamptz, $9::timestamptz
+     )
+     RETURNING ${CAPITAL_COLUMNS}`,
+    [
+      transactionId,
+      investorId,
+      wholeAmount,
+      utrNumber || null,
+      remark || null,
+      adminId,
+      adminRemark,
+      String(transactionDate).slice(0, 10),
+      createdAtIso,
+    ]
+  );
+
+  return result.rows[0];
 }
 
 /**
@@ -292,7 +377,12 @@ export async function getInvestorCapitalTransactions(
      FROM capital_transactions
      WHERE investor_id = $1
        AND is_deleted = FALSE
-     ORDER BY created_at DESC
+     ORDER BY COALESCE(
+       transfer_date,
+       payment_date,
+       (created_at AT TIME ZONE '${TIMEZONE}')::date
+     ) DESC,
+     created_at DESC
      LIMIT $2 OFFSET $3`,
     [investorId, limitNum, offset]
   );

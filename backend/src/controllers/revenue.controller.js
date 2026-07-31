@@ -42,6 +42,29 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
+/**
+ * Normalize a SQL DATE / timestamp to YYYY-MM-DD without timezone shift.
+ * Prefer credit_date calendar value over created_at.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function toDateOnlyString(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+  if (typeof value === 'string') {
+    const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+    return match ? match[1] : value.slice(0, 10);
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear();
+    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(value.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(value).slice(0, 10);
+}
+
 const REVENUE_WITHDRAWAL_STATUSES = Object.freeze([
   'submitted',
   'under_review',
@@ -214,12 +237,13 @@ async function buildRevenueLedger(investorId, filters = {}) {
        id::TEXT AS id,
        transaction_id,
        credit_date AS entry_date,
+       credit_date,
        amount,
        credit_type AS entry_type,
        is_reversed,
        COALESCE(admin_remark, reversal_reason) AS remark,
        created_at,
-       created_at AS sort_at
+       (credit_date::text || 'T00:00:00+05:30')::timestamptz AS sort_at
      FROM revenue_credits
      WHERE investor_id = $1
        AND is_deleted = FALSE
@@ -258,6 +282,11 @@ async function buildRevenueLedger(investorId, filters = {}) {
   }
 
   const merged = [...creditsResult.rows, ...wdrRows].sort((a, b) => {
+    const dateA = toDateOnlyString(a.entry_date) || '';
+    const dateB = toDateOnlyString(b.entry_date) || '';
+    if (dateA !== dateB) {
+      return dateA.localeCompare(dateB);
+    }
     const ta = new Date(a.sort_at).getTime();
     const tb = new Date(b.sort_at).getTime();
     if (ta !== tb) return ta - tb;
@@ -285,20 +314,28 @@ async function buildRevenueLedger(investorId, filters = {}) {
       }
     }
 
+    // Display date = credit_date (entry_date), never created_at
     const dateValue =
-      row.entry_date instanceof Date
-        ? row.entry_date.toISOString().slice(0, 10)
-        : String(row.entry_date).slice(0, 10);
+      toDateOnlyString(row.credit_date) ||
+      toDateOnlyString(row.entry_date);
 
     const forInvestor = filters.forAdmin !== true;
     const description = describeRevenueEntry(type, row.remark, {
       forInvestor,
     });
 
+    const sortAtIso =
+      dateValue != null
+        ? `${dateValue}T00:00:00.000+05:30`
+        : row.sort_at instanceof Date
+          ? row.sort_at.toISOString()
+          : new Date(row.sort_at).toISOString();
+
     return {
       id: row.id,
       transaction_id: row.transaction_id,
       date: dateValue,
+      credit_date: dateValue,
       description,
       particular: description,
       credit_amount: creditAmount,
@@ -309,10 +346,7 @@ async function buildRevenueLedger(investorId, filters = {}) {
       is_backdated: forInvestor ? false : type === 'backdate',
       is_reversed: row.is_reversed === true,
       balance: running,
-      sort_at:
-        row.sort_at instanceof Date
-          ? row.sort_at.toISOString()
-          : new Date(row.sort_at).toISOString(),
+      sort_at: sortAtIso,
     };
   });
 }

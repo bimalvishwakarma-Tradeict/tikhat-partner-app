@@ -509,3 +509,104 @@ export async function updateCreditSettings(investorId, updates, adminId) {
 
   return result.rows[0];
 }
+
+/**
+ * Insert a revenue credit with an explicit credit_date.
+ * Does not override credit_date with the current date.
+ *
+ * @param {import('pg').PoolClient | null} client
+ * @param {object} params
+ * @param {string} params.transactionId
+ * @param {string} params.investorId
+ * @param {string} params.creditDate - YYYY-MM-DD
+ * @param {number} params.amount
+ * @param {string} params.creditType
+ * @param {number | null} [params.roiPercentageApplied]
+ * @param {number | null} [params.capitalAtTime]
+ * @param {string | null} [params.adminRemark]
+ * @returns {Promise<object>}
+ */
+export async function insertRevenueCredit(client, {
+  transactionId,
+  investorId,
+  creditDate,
+  amount,
+  creditType,
+  roiPercentageApplied = null,
+  capitalAtTime = null,
+  adminRemark = null,
+}) {
+  if (!creditDate) {
+    throw new RevenueError(
+      'credit_date is required',
+      'VALIDATION_ERROR',
+      400
+    );
+  }
+
+  const executor = client || { query };
+  const dateStr = String(creditDate).slice(0, 10);
+  const wholeAmount = Math.round(Number(amount) || 0);
+  const roi =
+    roiPercentageApplied == null || roiPercentageApplied === ''
+      ? null
+      : toRoiPercent(roiPercentageApplied);
+
+  const hasRemark = adminRemark != null && String(adminRemark).trim() !== '';
+
+  const result = hasRemark
+    ? await executor.query(
+        `INSERT INTO revenue_credits (
+           transaction_id,
+           investor_id,
+           credit_date,
+           amount,
+           credit_type,
+           roi_percentage_applied,
+           capital_at_time,
+           admin_remark
+         ) VALUES (
+           $1, $2, $3::date, $4, $5, $6::NUMERIC(5,2), $7, $8
+         )
+         RETURNING id, transaction_id, investor_id, credit_date, amount,
+                   credit_type, roi_percentage_applied, capital_at_time,
+                   admin_remark, created_at`,
+        [
+          transactionId,
+          investorId,
+          dateStr,
+          wholeAmount,
+          creditType,
+          Number.isFinite(roi) ? roi : null,
+          capitalAtTime == null ? null : Math.round(Number(capitalAtTime)),
+          String(adminRemark).trim(),
+        ]
+      )
+    : await executor.query(
+        `INSERT INTO revenue_credits (
+           transaction_id,
+           investor_id,
+           credit_date,
+           amount,
+           credit_type,
+           roi_percentage_applied,
+           capital_at_time
+         ) VALUES (
+           $1, $2, $3::date, $4, $5, $6::NUMERIC(5,2), $7
+         )
+         RETURNING id, transaction_id, investor_id, credit_date, amount,
+                   credit_type, roi_percentage_applied, capital_at_time,
+                   created_at`,
+        [
+          transactionId,
+          investorId,
+          dateStr,
+          wholeAmount,
+          creditType,
+          Number.isFinite(roi) ? roi : null,
+          capitalAtTime == null ? null : Math.round(Number(capitalAtTime)),
+        ]
+      );
+
+  return result.rows[0];
+}
