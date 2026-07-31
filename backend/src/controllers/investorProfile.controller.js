@@ -447,11 +447,35 @@ export async function uploadProfilePhoto(req, res) {
 /**
  * POST /api/v1/investor/profile/documents
  * multipart fields: pan_front, pan_back, aadhar_front, aadhar_back
+ * At least one file required (not all four).
  */
 export async function uploadKycDocuments(req, res) {
   try {
     const user = await getInvestorOrThrow(req.user.userId);
     const files = req.files || {};
+
+    /**
+     * Resolve a single multer file for a field name.
+     * Supports fields() object map and any() array shapes.
+     * @param {string} field
+     * @returns {object | null}
+     */
+    const getFieldFile = (field) => {
+      if (!files) {
+        return null;
+      }
+      if (Array.isArray(files)) {
+        return files.find((f) => f && f.fieldname === field) || null;
+      }
+      const entry = files[field];
+      if (!entry) {
+        return null;
+      }
+      if (Array.isArray(entry)) {
+        return entry[0] || null;
+      }
+      return entry;
+    };
 
     const mapping = [
       {
@@ -476,18 +500,25 @@ export async function uploadKycDocuments(req, res) {
       },
     ];
 
+    const present = mapping
+      .map((item) => ({ item, file: getFieldFile(item.field) }))
+      .filter((row) => row.file);
+
+    if (present.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'At least one KYC document is required (pan_front, pan_back, aadhar_front, aadhar_back)',
+        error: 'VALIDATION_ERROR',
+      });
+    }
+
     const uploaded = [];
     const sets = [];
     const params = [];
     let i = 1;
 
-    for (const item of mapping) {
-      const list = files[item.field];
-      const file = Array.isArray(list) ? list[0] : null;
-      if (!file) {
-        continue;
-      }
-
+    for (const { item, file } of present) {
       if (item.column.startsWith('pan_')) {
         await assertInvestorCanEditProfileField(user.id, 'pan_number');
       }
@@ -508,15 +539,6 @@ export async function uploadKycDocuments(req, res) {
         file_id: record.id,
         file_name: record.original_name || null,
         file_type: record.mime_type || null,
-      });
-    }
-
-    if (uploaded.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'At least one KYC document is required (pan_front, pan_back, aadhar_front, aadhar_back)',
-        error: 'VALIDATION_ERROR',
       });
     }
 

@@ -16,6 +16,7 @@ const UPLOAD_ROOT = path.resolve(
 
 const ALLOWED_MIMES = Object.freeze([
   'image/jpeg',
+  'image/jpg',
   'image/png',
   'application/pdf',
 ]);
@@ -23,6 +24,14 @@ const ALLOWED_MIMES = Object.freeze([
 const ALLOWED_EXTENSIONS = Object.freeze(['.jpg', '.jpeg', '.png', '.pdf']);
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+const KYC_UPLOAD_FIELDS = Object.freeze([
+  { name: 'pan_front', maxCount: 1 },
+  { name: 'pan_back', maxCount: 1 },
+  { name: 'aadhar_front', maxCount: 1 },
+  { name: 'aadhar_back', maxCount: 1 },
+  { name: 'profile_photo', maxCount: 1 },
+]);
 
 const ensureDir = (dirPath) => {
   if (!fs.existsSync(dirPath)) {
@@ -38,6 +47,22 @@ ensureDir(path.join(UPLOAD_ROOT, 'kyc', 'aadhar', 'back'));
 ensureDir(path.join(UPLOAD_ROOT, 'profile-photos'));
 ensureDir(path.join(UPLOAD_ROOT, 'payment-screenshots'));
 ensureDir(path.join(UPLOAD_ROOT, 'support-attachments'));
+ensureDir(path.join(UPLOAD_ROOT, 'tmp'));
+
+/**
+ * Normalize MIME from React Native / browsers (image/jpg → image/jpeg).
+ * @param {string | undefined} mime
+ * @returns {string}
+ */
+const normalizeMime = (mime) => {
+  const value = String(mime || '')
+    .toLowerCase()
+    .trim();
+  if (value === 'image/jpg') {
+    return 'image/jpeg';
+  }
+  return value;
+};
 
 /**
  * Create multer instance for a subdirectory under uploads/.
@@ -55,18 +80,43 @@ export const createUploader = (subdir = '') => {
       cb(null, destination);
     },
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
+      let ext = path.extname(file.originalname || '').toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        const mime = normalizeMime(file.mimetype);
+        if (mime === 'image/jpeg') ext = '.jpg';
+        else if (mime === 'image/png') ext = '.png';
+        else if (mime === 'application/pdf') ext = '.pdf';
+        else ext = '.bin';
+      }
       const uniqueName = `${Date.now()}-${crypto.randomUUID()}${ext}`;
       cb(null, uniqueName);
     },
   });
 
   const fileFilter = (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const mimeAllowed = ALLOWED_MIMES.includes(file.mimetype);
+    const mime = normalizeMime(file.mimetype);
+    // Mutate so downstream storage.service sees a canonical MIME
+    file.mimetype = mime || file.mimetype;
+
+    let ext = path.extname(file.originalname || '').toLowerCase();
+    if (!ext || !ALLOWED_EXTENSIONS.includes(ext)) {
+      if (mime === 'image/jpeg') ext = '.jpg';
+      else if (mime === 'image/png') ext = '.png';
+      else if (mime === 'application/pdf') ext = '.pdf';
+    }
+
+    const mimeAllowed =
+      ALLOWED_MIMES.includes(mime) || ALLOWED_MIMES.includes(file.mimetype);
     const extAllowed = ALLOWED_EXTENSIONS.includes(ext);
 
-    if (mimeAllowed && extAllowed) {
+    // Accept when MIME is allowed; extension may be missing on mobile pickers
+    if (
+      mimeAllowed ||
+      (extAllowed && (!mime || mime === 'application/octet-stream'))
+    ) {
+      if (!path.extname(file.originalname || '') && ext) {
+        file.originalname = `${file.originalname || 'upload'}${ext}`;
+      }
       cb(null, true);
     } else {
       cb(new Error('FILE_TYPE_NOT_ALLOWED'), false);
@@ -89,6 +139,11 @@ export const uploadPanFront = createUploader(path.join('kyc', 'pan', 'front'));
 export const uploadPanBack = createUploader(path.join('kyc', 'pan', 'back'));
 export const uploadAadharFront = createUploader(path.join('kyc', 'aadhar', 'front'));
 export const uploadAadharBack = createUploader(path.join('kyc', 'aadhar', 'back'));
+
+/** Temp disk storage + multi-field KYC document upload (fields, not single). */
+export const uploadKycDocumentsMw = createUploader('tmp').fields([
+  ...KYC_UPLOAD_FIELDS,
+]);
 
 /**
  * Express error handler for multer / upload errors.
@@ -125,4 +180,4 @@ export const handleUploadError = (err, req, res, next) => {
   return next(err);
 };
 
-export { ALLOWED_MIMES, MAX_FILE_SIZE, UPLOAD_ROOT };
+export { ALLOWED_MIMES, MAX_FILE_SIZE, UPLOAD_ROOT, KYC_UPLOAD_FIELDS };

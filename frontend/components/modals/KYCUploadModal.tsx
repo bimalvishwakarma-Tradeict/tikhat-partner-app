@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../hooks/useTheme';
 import { MAX_FILE_SIZE_MB } from '../../constants';
+import { apiClient, toApiClientError } from '../../services/api';
 import { profileService } from '../../services/profile.service';
 import { ApiClientError } from '../../types/api.types';
 import type { Investor } from '../../types/models.types';
@@ -66,14 +68,74 @@ function emptySlots(): Record<KycDocKey, DocSlot> {
 }
 
 function normalizeMime(mime?: string | null, name?: string): string {
-  if (mime && mime !== 'application/octet-stream') {
-    return mime;
+  const raw = (mime || '').toLowerCase().trim();
+  if (raw === 'image/jpg') {
+    return 'image/jpeg';
+  }
+  if (raw && raw !== 'application/octet-stream') {
+    return raw;
   }
   const lower = (name || '').toLowerCase();
   if (lower.endsWith('.pdf')) return 'application/pdf';
   if (lower.endsWith('.png')) return 'image/png';
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  return mime || 'application/octet-stream';
+  return raw || 'image/jpeg';
+}
+
+function extensionForMime(mime: string): string {
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime === 'image/png') return 'png';
+  return 'jpg';
+}
+
+function ensureFileName(name: string | undefined, mime: string, key: string): string {
+  const base = (name || key).trim() || key;
+  if (ALLOWED_EXT.test(base)) {
+    return base;
+  }
+  return `${base.replace(/\.[^/.]+$/, '') || key}.${extensionForMime(mime)}`;
+}
+
+function toUploadUri(uri: string): string {
+  if (
+    uri.startsWith('file://') ||
+    uri.startsWith('content://') ||
+    uri.startsWith('ph://') ||
+    uri.startsWith('assets-library://') ||
+    uri.startsWith('http://') ||
+    uri.startsWith('https://') ||
+    uri.startsWith('blob:') ||
+    uri.startsWith('data:')
+  ) {
+    return uri;
+  }
+  return `file://${uri}`;
+}
+
+/**
+ * Append a picked file to FormData in a React Native–compatible shape.
+ */
+async function appendPickedFile(
+  form: FormData,
+  field: string,
+  file: PickedFile
+): Promise<void> {
+  const type = normalizeMime(file.type, file.name);
+  const name = ensureFileName(file.name, type, field);
+  const uri = toUploadUri(file.uri);
+
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    form.append(field, blob, name);
+    return;
+  }
+
+  form.append(field, {
+    uri,
+    name,
+    type,
+  } as unknown as Blob);
 }
 
 function validatePicked(file: PickedFile): string | null {
@@ -254,13 +316,13 @@ export function KYCUploadModal({
   };
 
   const uploadDocuments = async () => {
-    const payload: Partial<Record<KycDocKey, PickedFile>> = {};
-    (Object.keys(slots) as KycDocKey[]).forEach((key) => {
-      if (slots[key].file && slots[key].status === 'ready') {
-        payload[key] = slots[key].file!;
-      }
+    // Validate from slot state (previewed files), not FormData — at least 1 required
+    const payloadKeys = (Object.keys(slots) as KycDocKey[]).filter((key) => {
+      const slot = slots[key];
+      return Boolean(slot.file?.uri) && slot.status !== 'uploading';
     });
-    if (Object.keys(payload).length === 0) {
+
+    if (payloadKeys.length === 0) {
       setDocsError('Select at least one document to upload.');
       return;
     }
@@ -269,47 +331,64 @@ export function KYCUploadModal({
     setUploadingDocs(true);
     setSlots((prev) => {
       const next = { ...prev };
-      (Object.keys(payload) as KycDocKey[]).forEach((key) => {
+      payloadKeys.forEach((key) => {
         next[key] = { ...next[key], status: 'uploading', error: null };
       });
       return next;
     });
 
     try {
-      await profileService.uploadDocuments({
-        pan_front: payload.pan_front
-          ? {
-              uri: payload.pan_front.uri,
-              name: payload.pan_front.name,
-              type: payload.pan_front.type,
+      const form = new FormData();
+      let appended = 0;
+      for (const key of payloadKeys) {
+        const file = slots[key].file;
+        if (!file?.uri) {
+          continue;
+        }
+        const type = normalizeMime(file.type, file.name);
+        await appendPickedFile(form, key, {
+          uri: file.uri,
+          name: ensureFileName(file.name, type, key),
+          type,
+          size: file.size,
+        });
+        appended += 1;
+      }
+
+      if (appended === 0) {
+        setDocsError('Select at least one document to upload.');
+        setSlots((prev) => {
+          const next = { ...prev };
+          payloadKeys.forEach((key) => {
+            next[key] = {
+              ...next[key],
+              status: next[key].file ? 'ready' : 'idle',
+              error: null,
+            };
+          });
+          return next;
+        });
+        return;
+      }
+
+      await apiClient.post('/api/v1/investor/profile/documents', form, {
+        headers: {
+          Accept: 'application/json',
+        },
+        transformRequest: [
+          (data, headers) => {
+            // Do not force Content-Type — runtime must set multipart boundary
+            if (headers && typeof headers === 'object') {
+              delete (headers as Record<string, unknown>)['Content-Type'];
             }
-          : undefined,
-        pan_back: payload.pan_back
-          ? {
-              uri: payload.pan_back.uri,
-              name: payload.pan_back.name,
-              type: payload.pan_back.type,
-            }
-          : undefined,
-        aadhar_front: payload.aadhar_front
-          ? {
-              uri: payload.aadhar_front.uri,
-              name: payload.aadhar_front.name,
-              type: payload.aadhar_front.type,
-            }
-          : undefined,
-        aadhar_back: payload.aadhar_back
-          ? {
-              uri: payload.aadhar_back.uri,
-              name: payload.aadhar_back.name,
-              type: payload.aadhar_back.type,
-            }
-          : undefined,
+            return data;
+          },
+        ],
       });
 
       setSlots((prev) => {
         const next = { ...prev };
-        (Object.keys(payload) as KycDocKey[]).forEach((key) => {
+        payloadKeys.forEach((key) => {
           next[key] = { ...next[key], status: 'done', error: null };
         });
         return next;
@@ -317,14 +396,15 @@ export function KYCUploadModal({
       toast.success('KYC documents uploaded successfully');
       onSuccess?.();
     } catch (err) {
+      const normalized = toApiClientError(err);
       const message =
-        err instanceof ApiClientError
-          ? err.message
+        normalized instanceof ApiClientError
+          ? normalized.message
           : 'Failed to upload KYC documents';
       setDocsError(message);
       setSlots((prev) => {
         const next = { ...prev };
-        (Object.keys(payload) as KycDocKey[]).forEach((key) => {
+        payloadKeys.forEach((key) => {
           next[key] = { ...next[key], status: 'error', error: message };
         });
         return next;
