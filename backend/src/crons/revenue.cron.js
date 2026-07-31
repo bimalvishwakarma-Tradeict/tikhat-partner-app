@@ -198,11 +198,19 @@ async function hasDailyCreditToday(investorId, dateStr, client = null) {
 
 /**
  * Fire-and-forget investor notification + email.
+ * Skips when credit_type is backdate (silent ledger entries).
  * @param {object} investor
  * @param {object} credit
  * @param {number} revenueBalance
  */
 function notifyInvestorCreditAsync(investor, credit, revenueBalance) {
+  if (
+    credit?.credit_type === 'backdate' ||
+    credit?.source === 'backdate'
+  ) {
+    return;
+  }
+
   const title = 'Revenue credited';
   const body = `${formatCurrency(credit.amount)} credited on ${formatDate(credit.credit_date)}. ID: ${credit.transaction_id}`;
 

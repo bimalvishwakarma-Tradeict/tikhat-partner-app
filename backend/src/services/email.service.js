@@ -628,6 +628,24 @@ export async function sendEmail(to, templateName, data = {}) {
     throw new Error(`Unknown email template: ${templateName}`);
   }
 
+  // Backdate ledger entries are silent — never email investors
+  if (
+    data?.source === 'backdate' ||
+    data?.credit_type === 'backdate' ||
+    data?.creditType === 'backdate' ||
+    data?.isBackdated === true
+  ) {
+    logger.info('Skipping email for backdate source', {
+      to,
+      templateName,
+    });
+    return {
+      success: true,
+      message: 'Email skipped for backdate source',
+      data: { emailLogId: null, subject: null, skipped: true },
+    };
+  }
+
   const prepared = prepareTemplateData(data);
   // Preserve force-fail flag for delivery (stripped before render)
   if (data.__forceFail) {

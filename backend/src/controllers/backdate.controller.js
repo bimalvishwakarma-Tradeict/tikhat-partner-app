@@ -13,7 +13,6 @@ import {
   TRANSACTION_TYPES,
 } from '../services/transaction.service.js';
 import { sendEmail } from '../services/email.service.js';
-import { getRevenueBalance } from '../services/balance.service.js';
 import {
   findUserById,
   isEmailTaken,
@@ -287,18 +286,8 @@ async function notifySubmittingAdmin(request, title, body) {
     return;
   }
 
+  // In-app only — backdate approve/reject never emails admins or investors
   await createAdminNotification(admin.id, title, body, request.id);
-  await sendEmail(admin.email, 'custom-notification', {
-    investorName: admin.full_name || 'Admin',
-    subjectTitle: title,
-    body,
-    recipientType: 'admin',
-  }).catch((err) => {
-    logger.error(
-      `[Backdate] submitter notify email failed: ${err.message}`,
-      { error: err }
-    );
-  });
 }
 
 /**
@@ -1233,7 +1222,6 @@ async function executeCapitalBackdate(request, approverId) {
   const dateStr = details.date || request.start_date;
   const utrNumber = details.utr_number;
   const autoCalculate = details.auto_calculate_revenue !== false;
-  const sendEmailFlag = Boolean(request.send_email_to_investor);
 
   const client = await pool.connect();
   try {
@@ -1290,7 +1278,8 @@ async function executeCapitalBackdate(request, approverId) {
         credit_date: c.credit_date,
         amount: c.amount,
       })),
-      send_email: sendEmailFlag,
+      // Backdate is always silent — never email investors
+      send_email: false,
     };
 
     const updated = await client.query(
@@ -1314,33 +1303,6 @@ async function executeCapitalBackdate(request, approverId) {
     }
 
     await client.query('COMMIT');
-
-    for (const credit of credits) {
-      try {
-        await maybeEmailInvestorCredit(investor, credit, sendEmailFlag);
-      } catch (emailErr) {
-        logger.error(
-          `[Backdate] capital revenue email failed: ${emailErr.message}`,
-          { error: emailErr }
-        );
-      }
-    }
-
-    if (sendEmailFlag) {
-      try {
-        await sendEmail(investor.email, 'capital-transaction', {
-          investorName: investor.full_name,
-          amount: capitalTxn.amount,
-          transactionId: capitalTxn.transaction_id,
-          transactionType: 'Capital deposit',
-          status: 'Approved',
-          message: 'Backdated capital credited to your account',
-          referenceId: capitalTxn.transaction_id,
-        });
-      } catch {
-        // best-effort
-      }
-    }
 
     return {
       request: updated.rows[0],
@@ -1382,7 +1344,6 @@ async function executeNewInvestorBackdate(request, approverId) {
     throw error;
   }
 
-  const sendEmailFlag = Boolean(request.send_email_to_investor);
   const joiningDate = details.joining_date;
   const initialCapital = Math.round(Number(details.initial_capital));
   const roiPercentage = parseRoiPercent(details.roi_percentage);
@@ -1491,7 +1452,8 @@ async function executeNewInvestorBackdate(request, approverId) {
         credit_date: c.credit_date,
         amount: c.amount,
       })),
-      send_email: sendEmailFlag,
+      // Backdate is always silent — never email investors
+      send_email: false,
     };
 
     const updated = await client.query(
@@ -1531,22 +1493,6 @@ async function executeNewInvestorBackdate(request, approverId) {
     );
 
     await client.query('COMMIT');
-
-    if (sendEmailFlag) {
-      try {
-        await sendEmail(investor.email, 'approval', {
-          investorName: investor.full_name,
-          subjectTitle: 'Welcome to Tikhat Partner',
-          body: `Your Tikhat Partner account is active. Joining date: ${formatDate(joiningDate)}. Initial capital ${formatCurrency(initialCapital)} has been credited.`,
-          referenceId: capitalTxn.transaction_id,
-        });
-      } catch (emailErr) {
-        logger.error(
-          `[Backdate] welcome email failed: ${emailErr.message}`,
-          { error: emailErr }
-        );
-      }
-    }
 
     return {
       request: { ...updated.rows[0], details: sanitizedDetails },
@@ -1988,35 +1934,8 @@ async function insertBackdateCredit(client, params) {
 }
 
 /**
- * Optionally email investor for a credit.
- * @param {object} investor
- * @param {object} credit
- * @param {boolean} sendEmailFlag
- */
-async function maybeEmailInvestorCredit(investor, credit, sendEmailFlag) {
-  if (!sendEmailFlag) {
-    return;
-  }
-
-  let revenueBalance = credit.amount;
-  try {
-    revenueBalance = await getRevenueBalance(investor.id);
-  } catch {
-    // best-effort
-  }
-
-  await sendEmail(investor.email, 'revenue-credit', {
-    investorName: investor.full_name,
-    amount: credit.amount,
-    creditDate: credit.credit_date,
-    runningBalance: revenueBalance,
-    transactionId: credit.transaction_id,
-    referenceId: credit.transaction_id,
-  });
-}
-
-/**
  * Execute a pending single/bulk revenue backdate request.
+ * Silent — never emails or notifies the investor.
  * @param {object} request
  * @param {string} approverId
  * @returns {Promise<object>}
@@ -2034,7 +1953,6 @@ async function executeRevenueBackdate(request, approverId) {
     request.details && typeof request.details === 'object'
       ? request.details
       : {};
-  const sendEmailFlag = Boolean(request.send_email_to_investor);
   /** @type {object[]} */
   const createdCredits = [];
 
@@ -2117,7 +2035,8 @@ async function executeRevenueBackdate(request, approverId) {
         credit_date: c.credit_date,
         amount: c.amount,
       })),
-      send_email: sendEmailFlag,
+      // Backdate is always silent — never email investors
+      send_email: false,
     };
 
     const updated = await client.query(
@@ -2142,18 +2061,6 @@ async function executeRevenueBackdate(request, approverId) {
     }
 
     await client.query('COMMIT');
-
-    // Emails after commit
-    for (const credit of createdCredits) {
-      try {
-        await maybeEmailInvestorCredit(investor, credit, sendEmailFlag);
-      } catch (emailErr) {
-        logger.error(
-          `[Backdate] investor credit email failed: ${emailErr.message}`,
-          { error: emailErr, transactionId: credit.transaction_id }
-        );
-      }
-    }
 
     return {
       request: updated.rows[0],
