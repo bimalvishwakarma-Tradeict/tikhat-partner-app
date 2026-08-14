@@ -7,8 +7,8 @@ import { getActiveAdmins } from '../models/user.model.js';
 import { getISTDateParts, getDaysInMonth } from '../services/roi.service.js';
 
 const JOB_NAME = 'roi_term_expiry_alert';
-/** Midnight IST daily */
-const CRON_EXPRESSION = '0 0 * * *';
+/** Midnight IST daily = 18:30 UTC previous day */
+const CRON_EXPRESSION = '30 18 * * *';
 
 /**
  * @param {string} jobName
@@ -283,14 +283,12 @@ export function startRoiTermExpiryAlertCron() {
     },
     {
       scheduled: true,
-      timezone: TIMEZONE,
     }
   );
 
   logger.info(`[Cron] ${JOB_NAME} registered`, {
     schedule: CRON_EXPRESSION,
-    timezone: TIMEZONE,
-    description: 'ROI term expiry alerts at 12:00 AM IST',
+    description: 'ROI term expiry alerts at 12:00 AM IST (18:30 UTC)',
   });
 
   return task;

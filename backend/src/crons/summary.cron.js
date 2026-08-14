@@ -5,8 +5,9 @@ import { TIMEZONE, getISTParts } from '../utils/formatDate.js';
 import { sendEmail } from '../services/email.service.js';
 
 const JOB_NAME = 'monthly_summary_email';
-/** 12:00 AM IST on the 1st of every month */
-const CRON_EXPRESSION = '0 0 1 * *';
+/** 12:00 AM IST on the 1st = 18:30 UTC on the last day of the previous month.
+ *  Scheduled daily at 18:30 UTC; callback only runs when IST day is 1. */
+const CRON_EXPRESSION = '30 18 * * *';
 
 const MONTH_LABELS = Object.freeze([
   'Jan',
@@ -467,18 +468,20 @@ export function startMonthlySummaryCron() {
   const task = cron.schedule(
     CRON_EXPRESSION,
     async () => {
+      const { day } = getISTParts(new Date());
+      if (day !== 1) {
+        return;
+      }
       await runMonthlySummaryJob();
     },
     {
       scheduled: true,
-      timezone: TIMEZONE,
     }
   );
 
   logger.info(`[Cron] ${JOB_NAME} registered`, {
     schedule: CRON_EXPRESSION,
-    timezone: TIMEZONE,
-    description: 'Monthly summary emails at 12:00 AM IST on the 1st',
+    description: 'Monthly summary emails at 12:00 AM IST on the 1st (18:30 UTC)',
   });
 
   // Same-day recovery if server was down at midnight on the 1st

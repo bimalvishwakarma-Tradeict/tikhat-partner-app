@@ -4,8 +4,8 @@ import { logger } from '../utils/logger.js';
 import { TIMEZONE } from '../utils/formatDate.js';
 
 const JOB_NAME = 'account_auto_unlock';
-/** Midnight IST daily */
-const CRON_EXPRESSION = '0 0 * * *';
+/** Midnight IST daily = 18:30 UTC previous day */
+const CRON_EXPRESSION = '30 18 * * *';
 
 let schemaReady = false;
 
@@ -188,14 +188,12 @@ export function startAccountUnlockCron() {
     },
     {
       scheduled: true,
-      timezone: TIMEZONE,
     }
   );
 
   logger.info(`[Cron] ${JOB_NAME} registered`, {
     schedule: CRON_EXPRESSION,
-    timezone: TIMEZONE,
-    description: 'Daily account unlock at 12:00 AM IST',
+    description: 'Daily account unlock at 12:00 AM IST (18:30 UTC)',
   });
 
   return task;

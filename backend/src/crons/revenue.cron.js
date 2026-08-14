@@ -22,6 +22,8 @@ import { getActiveAdmins } from '../models/user.model.js';
 
 const JOB_NAME = 'revenue_credit';
 const SETTINGS_KEY = 'revenue_credit_time';
+const SETTINGS_HOUR_KEY = 'revenue_credit_hour';
+const SETTINGS_MINUTE_KEY = 'revenue_credit_minute';
 const DEFAULT_CREDIT_TIME = '18:00';
 const SETTINGS_POLL_MS = 5 * 60 * 1000;
 const RETRY_DELAY_MS =
@@ -98,9 +100,23 @@ function sleep(ms) {
 }
 
 /**
- * Parse HH:MM from global_settings into a cron expression (minute hour * * *).
+ * Convert IST clock time to UTC. IST is UTC+5:30.
+ * @param {number} istHour
+ * @param {number} istMinute
+ * @returns {{ utcHour: number, utcMinute: number }}
+ */
+export function istTimeToUtc(istHour, istMinute) {
+  const result = (istHour * 60 + istMinute - 330 + 1440) % 1440;
+  return {
+    utcHour: Math.floor(result / 60),
+    utcMinute: result % 60,
+  };
+}
+
+/**
+ * Parse HH:MM (IST) from global_settings into a UTC cron expression.
  * @param {string} value
- * @returns {{ hour: number, minute: number, expression: string }}
+ * @returns {{ hour: number, minute: number, utcHour: number, utcMinute: number, expression: string }}
  */
 export function parseRevenueCreditTime(value) {
   const raw = String(value || DEFAULT_CREDIT_TIME).trim();
@@ -126,27 +142,56 @@ export function parseRevenueCreditTime(value) {
     return parseRevenueCreditTime(DEFAULT_CREDIT_TIME);
   }
 
+  const { utcHour, utcMinute } = istTimeToUtc(hour, minute);
+
   return {
     hour,
     minute,
-    expression: `${minute} ${hour} * * *`,
+    utcHour,
+    utcMinute,
+    expression: `${utcMinute} ${utcHour} * * *`,
   };
 }
 
 /**
- * Load global revenue credit time (IST).
+ * Load global revenue credit time (IST) from hour/minute settings.
+ * Falls back to revenue_credit_time (HH:MM) then 18:00.
  * @returns {Promise<string>}
  */
 export async function loadRevenueCreditTime() {
   const result = await query(
-    `SELECT value
+    `SELECT key, value
      FROM global_settings
-     WHERE key = $1
-     LIMIT 1`,
-    [SETTINGS_KEY]
+     WHERE key = ANY($1::TEXT[])`,
+    [[SETTINGS_HOUR_KEY, SETTINGS_MINUTE_KEY, SETTINGS_KEY]]
   );
 
-  return result.rows[0]?.value || DEFAULT_CREDIT_TIME;
+  /** @type {Record<string, string>} */
+  const settings = {};
+  for (const row of result.rows) {
+    settings[row.key] = row.value;
+  }
+
+  if (
+    settings[SETTINGS_HOUR_KEY] !== undefined &&
+    settings[SETTINGS_HOUR_KEY] !== null &&
+    String(settings[SETTINGS_HOUR_KEY]).trim() !== ''
+  ) {
+    const hour = Number(settings[SETTINGS_HOUR_KEY]);
+    const minute = Number(settings[SETTINGS_MINUTE_KEY] ?? 0);
+    if (
+      Number.isInteger(hour) &&
+      Number.isInteger(minute) &&
+      hour >= 0 &&
+      hour <= 23 &&
+      minute >= 0 &&
+      minute <= 59
+    ) {
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    }
+  }
+
+  return settings[SETTINGS_KEY] || DEFAULT_CREDIT_TIME;
 }
 
 /**
@@ -594,7 +639,8 @@ export async function runRevenueCreditJob(options = {}) {
  */
 export async function ensureRevenueCreditSchedule() {
   const timeValue = await loadRevenueCreditTime();
-  const { expression, hour, minute } = parseRevenueCreditTime(timeValue);
+  const { expression, hour, minute, utcHour, utcMinute } =
+    parseRevenueCreditTime(timeValue);
 
   if (scheduledTask && currentCronExpression === expression) {
     return {
@@ -619,7 +665,6 @@ export async function ensureRevenueCreditSchedule() {
     },
     {
       scheduled: true,
-      timezone: TIMEZONE,
     }
   );
 
@@ -627,9 +672,9 @@ export async function ensureRevenueCreditSchedule() {
 
   logger.info(`[Cron] ${JOB_NAME} registered`, {
     schedule: expression,
-    time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
-    timezone: TIMEZONE,
-    description: 'Daily revenue credit at admin-configured IST time',
+    istTime: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+    utcTime: `${String(utcHour).padStart(2, '0')}:${String(utcMinute).padStart(2, '0')}`,
+    description: 'Daily revenue credit at admin-configured IST time (UTC schedule)',
   });
 
   return {

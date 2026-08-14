@@ -5,8 +5,8 @@ import { TIMEZONE, formatDate } from '../utils/formatDate.js';
 import { sendEmail } from '../services/email.service.js';
 
 const JOB_NAME = 'ticket_escalation';
-/** Midnight IST daily */
-const CRON_EXPRESSION = '0 0 * * *';
+/** Midnight IST daily = 18:30 UTC previous day */
+const CRON_EXPRESSION = '30 18 * * *';
 
 /**
  * @param {string} jobName
@@ -314,14 +314,12 @@ export function startTicketEscalationCron() {
     },
     {
       scheduled: true,
-      timezone: TIMEZONE,
     }
   );
 
   logger.info(`[Cron] ${JOB_NAME} registered`, {
     schedule: CRON_EXPRESSION,
-    timezone: TIMEZONE,
-    description: 'Escalate unresolved support tickets after 7 days at 12:00 AM IST',
+    description: 'Escalate unresolved support tickets after 7 days at 12:00 AM IST (18:30 UTC)',
   });
 
   return task;

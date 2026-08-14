@@ -5,8 +5,8 @@ import { TIMEZONE } from '../utils/formatDate.js';
 import { performBackup } from '../services/backup.service.js';
 
 const JOB_NAME = 'database_backup';
-/** 12:00 AM IST daily */
-const CRON_EXPRESSION = '0 0 * * *';
+/** 12:00 AM IST daily = 18:30 UTC previous day */
+const CRON_EXPRESSION = '30 18 * * *';
 
 /** @type {import('node-cron').ScheduledTask | null} */
 let scheduledTask = null;
@@ -151,14 +151,12 @@ export function startBackupCron() {
     },
     {
       scheduled: true,
-      timezone: TIMEZONE,
     }
   );
 
   logger.info(`[Cron] ${JOB_NAME} registered`, {
     schedule: CRON_EXPRESSION,
-    timezone: TIMEZONE,
-    description: 'Daily database backup at 12:00 AM IST',
+    description: 'Daily database backup at 12:00 AM IST (18:30 UTC)',
   });
 
   return scheduledTask;
