@@ -367,6 +367,13 @@ export async function creditInvestorForDate(investor, dateStr, cronJobId = null)
       client,
     });
 
+    // ROI % must keep 2 decimal places — never parseInt / integer Math.round
+    const roiParsed = parseFloat(roiPercentage);
+    const roiPercentageApplied =
+      Number.isFinite(roiParsed) && roiParsed > 0
+        ? parseFloat(roiParsed.toFixed(2))
+        : null;
+
     const insertResult = await client.query(
       `INSERT INTO revenue_credits (
          transaction_id,
@@ -377,7 +384,7 @@ export async function creditInvestorForDate(investor, dateStr, cronJobId = null)
          roi_percentage_applied,
          capital_at_time,
          cron_job_id
-       ) VALUES ($1, $2, $3::DATE, $4, 'daily_auto', $5, $6, $7)
+       ) VALUES ($1, $2, $3::DATE, $4, 'daily_auto', $5::NUMERIC(5,2), $6, $7)
        RETURNING
          id,
          transaction_id,
@@ -394,12 +401,7 @@ export async function creditInvestorForDate(investor, dateStr, cronJobId = null)
         investor.id,
         dateStr,
         amount,
-        (() => {
-          const roi = Number.parseFloat(String(roiPercentage));
-          return Number.isFinite(roi) && roi > 0
-            ? Number.parseFloat(roi.toFixed(2))
-            : null;
-        })(),
+        roiPercentageApplied,
         Math.round(capitalAtTime),
         cronJobId,
       ]

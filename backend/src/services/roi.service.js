@@ -40,6 +40,19 @@ export const getISTDateParts = (date) => {
 };
 
 /**
+ * Normalize ROI % with parseFloat (never parseInt). Keeps 2 decimal places.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export const toRoiPercent = (value) => {
+  const roi = parseFloat(String(value));
+  if (!Number.isFinite(roi) || roi <= 0) {
+    return 0;
+  }
+  return parseFloat(roi.toFixed(2));
+};
+
+/**
  * Full-month revenue for a capital balance.
  * Monthly amount = Math.round(capital * roiPercent / 100)
  * ROI % supports 2 decimal places (e.g. 4.50); money result stays whole rupees.
@@ -51,7 +64,7 @@ export const getISTDateParts = (date) => {
  */
 export const calculateMonthlyAmount = (capital, roiPercent, _daysInMonth) => {
   const cap = Math.round(Number(capital) || 0);
-  const roi = Number.parseFloat(String(roiPercent));
+  const roi = parseFloat(roiPercent);
 
   if (cap <= 0 || !Number.isFinite(roi) || roi <= 0) {
     return 0;
@@ -255,8 +268,7 @@ export const getActiveROI = async (investorId, date) => {
     );
 
     if (termResult.rows.length > 0) {
-      const roi = Number.parseFloat(String(termResult.rows[0].roi_percentage));
-      return Number.isFinite(roi) ? Number.parseFloat(roi.toFixed(2)) : 0;
+      return toRoiPercent(termResult.rows[0].roi_percentage);
     }
 
     const defaultResult = await pool.query(
@@ -275,8 +287,7 @@ export const getActiveROI = async (investorId, date) => {
       return 0;
     }
 
-    const roi = Number.parseFloat(String(defaultResult.rows[0].roi_percentage));
-    return Number.isFinite(roi) ? Number.parseFloat(roi.toFixed(2)) : 0;
+    return toRoiPercent(defaultResult.rows[0].roi_percentage);
   } catch (error) {
     logger.error(`[ROIService] getActiveROI error: ${error.message}`, {
       investorId,
@@ -497,7 +508,7 @@ export const calculateBackdateDailyAmounts = async (
 
       let roi;
       if (roiPercentage != null && Number.isFinite(Number(roiPercentage))) {
-        roi = Number.parseFloat(Number(roiPercentage).toFixed(2));
+        roi = toRoiPercent(roiPercentage);
       } else if (investorId) {
         roi = await getActiveROI(investorId, dateStr);
       } else {
@@ -538,7 +549,7 @@ export const calculateBackdateDailyAmounts = async (
         date: row.date,
         amount,
         capitalUsed: Math.round(row.capital),
-        roi_percentage: Number.parseFloat(Number(row.roi || 0).toFixed(2)),
+        roi_percentage: toRoiPercent(row.roi || 0),
       });
     }
   }
